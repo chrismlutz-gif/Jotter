@@ -167,12 +167,15 @@ class Editor(tk.Tk):
         self._build_tab_bar()
         self._build_body()
         self._build_statusbar()
+        self._build_findbar()
 
         self.bind("<Control-n>", lambda _e: self.cmd_new_tab())
         self.bind("<Control-o>", lambda _e: self.cmd_open())
         self.bind("<Control-s>", lambda _e: self.cmd_save())
         self.bind("<Control-S>", lambda _e: self.cmd_save_as())
         self.bind("<Control-w>", lambda _e: self.cmd_close_tab())
+        self.bind("<Control-f>", lambda _e: self._show_find_bar(False))
+        self.bind("<Control-h>", lambda _e: self._show_find_bar(True))
         self.protocol("WM_DELETE_WINDOW", self._on_quit)
 
         if not self._load_session():
@@ -208,6 +211,9 @@ class Editor(tk.Tk):
         em.add_command(label="Paste Ctrl+V",  command=lambda: self.focus_get() and self.focus_get().event_generate("<<Paste>>"))
         em.add_separator()
         em.add_command(label="Select All Ctrl+A", command=self._select_all)
+        em.add_separator()
+        em.add_command(label="Find...    Ctrl+F", command=lambda: self._show_find_bar(False))
+        em.add_command(label="Replace... Ctrl+H", command=lambda: self._show_find_bar(True))
         mb.add_cascade(label="Edit", menu=em)
 
         om = tk.Menu(mb, **kw)
@@ -1069,6 +1075,277 @@ class Editor(tk.Tk):
                   cursor="hand2").pack(pady=14)
 
     # ------------------------------------------------------------------
+    # File commands
+    # ------------------------------------------------------------------
+    def _refresh_tab_label(self, tab):
+        title = tab.title.rstrip(" *")
+        if tab.modified:
+            title += " *"
+        tab.title = title
+        if tab.title_lbl:
+            tab.title_lbl.config(text=title)
+
+    def cmd_open(self, event=None):
+        path = filedialog.askopenfilename(
+            parent=self,
+            title="Open file",
+            filetypes=[("Text files", "*.txt"), ("All files", "*.*")])
+        if not path:
+            return
+        try:
+            with open(path, "r", encoding="utf-8", errors="replace") as f:
+                content = f.read()
+        except Exception as e:
+            messagebox.showerror("Open failed", str(e), parent=self)
+            return
+        import os as _os
+        tab = self.cmd_new_tab(title=_os.path.basename(path))
+        tab.path     = path
+        tab.modified = False
+        if tab.text:
+            tab.text.delete("1.0", "end")
+            tab.text.insert("1.0", content)
+            tab.text.edit_reset()
+        self._refresh_tab_label(tab)
+
+    def cmd_save(self, tab=None, event=None):
+        if tab is None:
+            tab = self._active
+        if tab is None:
+            return
+        if tab.path is None:
+            self.cmd_save_as(tab)
+            return
+        try:
+            with open(tab.path, "w", encoding="utf-8") as f:
+                f.write(tab.text.get("1.0", "end-1c"))
+            tab.modified = False
+            self._refresh_tab_label(tab)
+        except Exception as e:
+            messagebox.showerror("Save failed", str(e), parent=self)
+
+    def cmd_save_as(self, tab=None, event=None):
+        if tab is None:
+            tab = self._active
+        if tab is None:
+            return
+        path = filedialog.asksaveasfilename(
+            parent=self,
+            title="Save As",
+            defaultextension=".txt",
+            filetypes=[("Text files", "*.txt"), ("All files", "*.*")])
+        if not path:
+            return
+        import os as _os
+        tab.path  = path
+        tab.title = _os.path.basename(path)
+        self.cmd_save(tab)
+
+    def cmd_toggle_theme(self):
+        self._dark = not self._dark
+        self._T    = DARK if self._dark else LIGHT
+        # rebuild the whole UI by destroying children and re-running builds
+        for w in self.winfo_children():
+            w.destroy()
+        self.configure(bg=self._T["bg"])
+        self._find_frame  = None
+        self._active      = None
+        tabs_backup = [(t.title.rstrip(" *"), t.path, t.color,
+                        t.text.get("1.0", "end-1c") if t.text else "",
+                        t.group) for t in self._tabs]
+        self._tabs = []
+        self._build_menu()
+        self._build_tab_bar()
+        self._build_body()
+        self._build_statusbar()
+        self._build_findbar()
+        for title, path, color, content, grp in tabs_backup:
+            tab = self.cmd_new_tab(title=title)
+            tab.path  = path
+            tab.color = color
+            if tab.text:
+                tab.text.insert("1.0", content)
+                tab.text.edit_reset()
+                tab.modified = False
+            if grp is not None:
+                tab.group = grp
+        self._rebuild_tab_buttons()
+        if self._tabs:
+            self._activate(self._tabs[0])
+
+    # ------------------------------------------------------------------
+    # Find / Replace bar
+    # ------------------------------------------------------------------
+    def _build_findbar(self):
+        T   = self._T
+        bar = tk.Frame(self, bg=T["tab_bar"], bd=0)
+        self._find_frame = bar
+        # not packed yet — shown on demand
+
+        # Close button
+        close = tk.Label(bar, text="  ×  ", bg=T["tab_bar"], fg=T["close_fg"],
+                         font=("Segoe UI", 13), cursor="hand2")
+        close.pack(side="right", padx=4)
+        close.bind("<Button-1>", lambda _e: self._hide_find_bar())
+
+        # Find row
+        find_row = tk.Frame(bar, bg=T["tab_bar"])
+        find_row.pack(side="top", fill="x", padx=8, pady=(4, 2))
+        tk.Label(find_row, text="Find:", bg=T["tab_bar"], fg=T["text_fg"],
+                 font=("Segoe UI", 10), width=7, anchor="e").pack(side="left")
+        self._find_var = tk.StringVar()
+        fe = tk.Entry(find_row, textvariable=self._find_var, width=30,
+                      bg=T["text_bg"], fg=T["text_fg"],
+                      insertbackground=T["text_fg"],
+                      relief="flat", bd=4, font=("Segoe UI", 10))
+        fe.pack(side="left", padx=(4, 0))
+        self._find_entry = fe
+        self._find_count_lbl = tk.Label(find_row, text="", bg=T["tab_bar"],
+                                        fg=T["ln_fg"], font=("Segoe UI", 9), padx=6)
+        self._find_count_lbl.pack(side="left")
+        tk.Button(find_row, text="▲", command=lambda: self._find_step(-1),
+                  bg=T["tab_idle"], fg=T["text_fg"], relief="flat",
+                  font=("Segoe UI", 9), padx=6, pady=1,
+                  cursor="hand2").pack(side="left", padx=2)
+        tk.Button(find_row, text="▼", command=lambda: self._find_step(1),
+                  bg=T["tab_idle"], fg=T["text_fg"], relief="flat",
+                  font=("Segoe UI", 9), padx=6, pady=1,
+                  cursor="hand2").pack(side="left", padx=2)
+        self._find_var.trace_add("write", lambda *_: self._run_find())
+
+        # Replace row (hidden until replace mode)
+        rep_row = tk.Frame(bar, bg=T["tab_bar"])
+        self._replace_row = rep_row
+        tk.Label(rep_row, text="Replace:", bg=T["tab_bar"], fg=T["text_fg"],
+                 font=("Segoe UI", 10), width=7, anchor="e").pack(side="left")
+        self._replace_var = tk.StringVar()
+        tk.Entry(rep_row, textvariable=self._replace_var, width=30,
+                 bg=T["text_bg"], fg=T["text_fg"],
+                 insertbackground=T["text_fg"],
+                 relief="flat", bd=4, font=("Segoe UI", 10)).pack(side="left", padx=(4, 8))
+        tk.Button(rep_row, text="Replace", command=self._do_replace,
+                  bg=T["tab_idle"], fg=T["text_fg"], relief="flat",
+                  font=("Segoe UI", 9), padx=8, pady=1,
+                  cursor="hand2").pack(side="left", padx=2)
+        tk.Button(rep_row, text="Replace All", command=self._do_replace_all,
+                  bg=T["tab_idle"], fg=T["text_fg"], relief="flat",
+                  font=("Segoe UI", 9), padx=8, pady=1,
+                  cursor="hand2").pack(side="left", padx=2)
+        self._replace_lbl = tk.Label(rep_row, text="", bg=T["tab_bar"],
+                                     fg=T["ln_fg"], font=("Segoe UI", 9), padx=6)
+        self._replace_lbl.pack(side="left")
+
+        # internal state
+        self._find_matches = []   # list of (start, end) index strings
+        self._find_idx     = -1
+
+        fe.bind("<Return>",          lambda _e: self._find_step(1))
+        fe.bind("<Shift-Return>",    lambda _e: self._find_step(-1))
+        fe.bind("<Escape>",          lambda _e: self._hide_find_bar())
+
+    def _show_find_bar(self, replace=False):
+        self._find_frame.pack(side="bottom", fill="x",
+                              before=self._status_left.master)
+        if replace:
+            self._replace_row.pack(side="top", fill="x", padx=8, pady=(0, 4))
+        else:
+            self._replace_row.pack_forget()
+        self._find_entry.focus_set()
+        self._find_entry.select_range(0, "end")
+        self._run_find()
+
+    def _hide_find_bar(self):
+        self._find_frame.pack_forget()
+        self._clear_find_highlights()
+        self._find_matches = []
+        self._find_idx     = -1
+        self._find_count_lbl.config(text="")
+        if self._active and self._active.text:
+            self._active.text.focus_set()
+
+    def _run_find(self):
+        self._clear_find_highlights()
+        self._find_matches = []
+        self._find_idx     = -1
+        if not self._active or not self._active.text:
+            return
+        pattern = self._find_var.get()
+        if not pattern:
+            self._find_count_lbl.config(text="")
+            return
+        txt = self._active.text
+        txt.tag_configure("find_match",    background="#515c6a", foreground="#ffffff")
+        txt.tag_configure("find_current",  background="#f6b73c", foreground="#000000")
+        pos = "1.0"
+        while True:
+            idx = txt.search(pattern, pos, stopindex="end", nocase=True)
+            if not idx:
+                break
+            end = "%s+%dc" % (idx, len(pattern))
+            txt.tag_add("find_match", idx, end)
+            self._find_matches.append((idx, end))
+            pos = end
+        n = len(self._find_matches)
+        if n:
+            self._find_count_lbl.config(text="%d match%s" % (n, "es" if n != 1 else ""))
+            self._find_step(1)
+        else:
+            self._find_count_lbl.config(text="No matches")
+
+    def _find_step(self, direction):
+        if not self._find_matches:
+            return
+        n = len(self._find_matches)
+        self._find_idx = (self._find_idx + direction) % n
+        start, end = self._find_matches[self._find_idx]
+        txt = self._active.text
+        txt.tag_remove("find_current", "1.0", "end")
+        txt.tag_add("find_current", start, end)
+        txt.see(start)
+        self._find_count_lbl.config(
+            text="%d / %d" % (self._find_idx + 1, n))
+
+    def _clear_find_highlights(self):
+        if self._active and self._active.text:
+            self._active.text.tag_remove("find_match",   "1.0", "end")
+            self._active.text.tag_remove("find_current", "1.0", "end")
+
+    def _do_replace(self):
+        if not self._find_matches or self._find_idx < 0:
+            return
+        txt         = self._active.text
+        start, end  = self._find_matches[self._find_idx]
+        replacement = self._replace_var.get()
+        txt.delete(start, end)
+        txt.insert(start, replacement)
+        self._replace_lbl.config(text="Replaced.")
+        self.after(1500, lambda: self._replace_lbl.config(text=""))
+        self._run_find()
+
+    def _do_replace_all(self):
+        if not self._active or not self._active.text:
+            return
+        pattern     = self._find_var.get()
+        replacement = self._replace_var.get()
+        if not pattern:
+            return
+        txt   = self._active.text
+        count = 0
+        pos   = "1.0"
+        while True:
+            idx = txt.search(pattern, pos, stopindex="end", nocase=True)
+            if not idx:
+                break
+            end = "%s+%dc" % (idx, len(pattern))
+            txt.delete(idx, end)
+            txt.insert(idx, replacement)
+            pos = "%s+%dc" % (idx, len(replacement))
+            count += 1
+        self._replace_lbl.config(text="%d replaced." % count)
+        self.after(2000, lambda: self._replace_lbl.config(text=""))
+        self._run_find()
+
+    # ------------------------------------------------------------------
     # Body (text area + line numbers)
     # ------------------------------------------------------------------
     def _build_body(self):
@@ -1180,6 +1457,7 @@ class Editor(tk.Tk):
         self._update_linenos(tab)
         return tab
 
+
     def cmd_close_tab(self, tab=None):
         if tab is None:
             tab = self._active
@@ -1205,8 +1483,6 @@ class Editor(tk.Tk):
             remaining = [t for t in self._tabs if t.group is grp]
             if len(remaining) == 1:
                 remaining[0].group = None
-            elif len(remaining) == 0:
-                pass
 
         if self._active is tab:
             self._active = None
@@ -1218,218 +1494,92 @@ class Editor(tk.Tk):
         if not self._tabs:
             self.cmd_new_tab()
 
-    def cmd_open(self):
-        paths = filedialog.askopenfilenames(
-            parent=self,
-            filetypes=[("Text files", "*.txt *.py *.md *.json *.csv *.html *.css *.js"),
-                       ("All files", "*.*")])
-        for path in paths:
-            try:
-                with open(path, "r", encoding="utf-8", errors="replace") as fh:
-                    content = fh.read()
-            except Exception as e:
-                messagebox.showerror("Open Error", str(e), parent=self)
-                continue
-            title = os.path.basename(path)
-            tab   = self.cmd_new_tab(title=title, content=content)
-            tab.filepath = path
-            tab.modified = False
-            if tab.title_lbl:
-                tab.title_lbl.config(text=tab.title)
-
-    def cmd_save(self, tab=None):
-        if tab is None:
-            tab = self._active
-        if tab is None:
-            return
-        if tab.filepath:
-            self._write_file(tab, tab.filepath)
-        else:
-            self.cmd_save_as(tab)
-
-    def cmd_save_as(self, tab=None):
-        if tab is None:
-            tab = self._active
-        if tab is None:
-            return
-        path = filedialog.asksaveasfilename(
-            parent=self,
-            defaultextension=".txt",
-            filetypes=[("Text files", "*.txt"), ("Python", "*.py"),
-                       ("Markdown", "*.md"), ("All files", "*.*")])
-        if path:
-            self._write_file(tab, path)
-
-    def _write_file(self, tab, path):
-        try:
-            content = tab.text.get("1.0", "end-1c")
-            with open(path, "w", encoding="utf-8") as fh:
-                fh.write(content)
-            tab.filepath = path
-            tab.modified = False
-            tab.title    = os.path.basename(path)
-            if tab.title_lbl:
-                tab.title_lbl.config(text=tab.title)
-        except Exception as e:
-            messagebox.showerror("Save Error", str(e), parent=self)
-
     # ------------------------------------------------------------------
-    # Session persistence
+    # Quit / session
     # ------------------------------------------------------------------
+    def _on_quit(self):
+        self._save_session()
+        self.destroy()
+
     def _save_session(self):
-        groups_seen = []
-        groups_data = []
+        data = {"tabs": [], "groups": {}}
+        grp_map = {}
         for tab in self._tabs:
-            if tab.group and tab.group not in groups_seen:
-                groups_seen.append(tab.group)
-                g = tab.group
-                groups_data.append({
-                    "id":        g.id,
-                    "color":     g.color,
-                    "label":     g.label,
-                    "collapsed": g.collapsed,
-                })
-
-        tabs_data = []
-        for tab in self._tabs:
-            content = None
-            if not tab.filepath and tab.text:
-                content = tab.text.get("1.0", "end-1c")
-            tabs_data.append({
+            grp_id = None
+            if tab.group is not None:
+                grp_id = id(tab.group)
+                if grp_id not in grp_map:
+                    grp_map[grp_id] = {
+                        "name":      tab.group.label,
+                        "color":     tab.group.color,
+                        "collapsed": tab.group.collapsed,
+                    }
+                    data["groups"][str(grp_id)] = grp_map[grp_id]
+            data["tabs"].append({
                 "title":    tab.title.rstrip(" *"),
                 "filepath": tab.filepath,
                 "color":    tab.color,
-                "group_id": tab.group.id if tab.group else None,
-                "content":  content,
+                "group_id": str(grp_id) if grp_id is not None else None,
+                "content":  tab.text.get("1.0", "end-1c") if tab.text else "",
             })
-
-        active_idx = 0
-        if self._active and self._active in self._tabs:
-            active_idx = self._tabs.index(self._active)
-
-        session = {
-            "active_index": active_idx,
-            "groups":       groups_data,
-            "tabs":         tabs_data,
-        }
         try:
-            with open(SESSION_FILE, "w", encoding="utf-8") as fh:
-                json.dump(session, fh, indent=2)
+            with open(SESSION_FILE, "w", encoding="utf-8") as f:
+                json.dump(data, f, indent=2)
         except Exception:
             pass
 
     def _load_session(self):
         try:
-            with open(SESSION_FILE, "r", encoding="utf-8") as fh:
-                session = json.load(fh)
+            with open(SESSION_FILE, "r", encoding="utf-8") as f:
+                data = json.load(f)
         except Exception:
             return False
-        if not session.get("tabs"):
+        groups_by_id = {}
+        for gid, gdata in data.get("groups", {}).items():
+            grp = TabGroup()
+            grp.label     = gdata.get("name", "Group")
+            grp.color     = gdata.get("color")
+            grp.collapsed = gdata.get("collapsed", False)
+            groups_by_id[gid] = grp
+        tabs_data = data.get("tabs", [])
+        if not tabs_data:
             return False
-
-        group_map = {}
-        for gd in session.get("groups", []):
-            grp           = TabGroup(color=gd["color"])
-            grp.id        = gd["id"]
-            grp.color     = gd["color"]
-            grp.label     = gd.get("label", "Group %d" % gd["id"])
-            grp.collapsed = gd.get("collapsed", False)
-            group_map[gd["id"]] = grp
-
-        loaded = []
-        for td in session["tabs"]:
-            if td.get("filepath"):
-                try:
-                    with open(td["filepath"], "r", encoding="utf-8", errors="replace") as fh:
-                        content = fh.read()
-                except Exception:
-                    content = td.get("content") or ""
-            else:
-                content = td.get("content") or ""
-            tab          = self.cmd_new_tab(title=td["title"], content=content)
-            tab.color    = td.get("color") or tab.color
-            tab.filepath = td.get("filepath")
-            tab.modified = False
-            gid = td.get("group_id")
-            if gid is not None and gid in group_map:
-                tab.group = group_map[gid]
-            loaded.append(tab)
-
-        if loaded:
-            idx = min(session.get("active_index", 0), len(loaded) - 1)
-            self._activate(loaded[idx])
+        for td in tabs_data:
+            tab = self.cmd_new_tab(title=td.get("title", "Untitled"))
+            if tab and tab.text:
+                tab.text.insert("1.0", td.get("content", ""))
+                tab.text.edit_reset()
+                tab.modified  = False
+                tab.filepath  = td.get("filepath")
+                tab.color     = td.get("color")
+                gid = td.get("group_id")
+                if gid and gid in groups_by_id:
+                    tab.group = groups_by_id[gid]
+                self._refresh_tab_label(tab)
         self._rebuild_tab_buttons()
+        if self._tabs:
+            self._activate(self._tabs[0])
         return True
-
-    # ------------------------------------------------------------------
-    # Quit
-    # ------------------------------------------------------------------
-    def _on_quit(self):
-        for tab in list(self._tabs):
-            if tab.modified:
-                name = tab.title.rstrip(" *")
-                ans  = messagebox.askyesnocancel(
-                    "Unsaved changes",
-                    'Save "%s" before quitting?' % name,
-                    parent=self)
-                if ans is None:
-                    return
-                if ans:
-                    self.cmd_save(tab)
-        self._save_session()
-        self.destroy()
-
-    # ------------------------------------------------------------------
-    # Theme
-    #     # ------------------------------------------------------------------
-    def cmd_toggle_theme(self):
-        self._theme_name = "light" if self._theme_name == "dark" else "dark"
-        self._T          = THEMES[self._theme_name]
-        self._apply_theme()
-
-    def _apply_theme(self):
-        T = self._T
-        self.configure(bg=T["bg"])
-        self._build_menu()
-        self._bar_outer.configure(bg=T["tab_bar"])
-        self._bar_canvas.configure(bg=T["tab_bar"])
-        self._bar_inner.configure(bg=T["tab_bar"])
-        self._plus.configure(bg=T["tab_bar"], fg=T["close_fg"])
-        self._body.configure(bg=T["bg"])
-        for tab in self._tabs:
-            if tab.text_frame:
-                tab.text_frame.configure(bg=T["bg"])
-            if tab.text:
-                tab.text.configure(
-                    bg=T["text_bg"], fg=T["text_fg"],
-                    insertbackground=T["text_fg"],
-                    selectbackground=T["text_sel"])
-            if tab.linenos:
-                tab.linenos.configure(
-                    bg=T["ln_bg"], fg=T["ln_fg"],
-                    selectbackground=T["ln_bg"])
-        self._status_left.configure(bg=T["status_bg"], fg=T["status_fg"])
-        self._status_right.configure(bg=T["status_bg"], fg=T["status_fg"])
-        self._status_left.master.configure(bg=T["status_bg"])
-        self._rebuild_tab_buttons()
 
 
 # ---------------------------------------------------------------------------
 # Entry point
 # ---------------------------------------------------------------------------
-if __name__ == "__main__":
+def main():
+    import traceback
+    log_path = os.path.join(_data_dir(), "jotter_error.log")
     try:
         app = Editor()
         app.mainloop()
     except Exception:
-        import traceback
         err = traceback.format_exc()
         try:
-            root = tk.Tk()
-            root.withdraw()
-            messagebox.showerror("Startup Error", err)
-            root.destroy()
-        except Exception:
-            log = os.path.join(_data_dir(), "jotter_error.log")
-            with open(log, "w") as f:
+            with open(log_path, "w", encoding="utf-8") as f:
                 f.write(err)
+        except Exception:
+            pass
+        raise
+
+
+if __name__ == "__main__":
+    main()
