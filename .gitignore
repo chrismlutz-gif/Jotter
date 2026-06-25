@@ -1,0 +1,33 @@
+# PyInstaller build output
+build/
+dist/
+installer/
+*.spec.bak
+
+# Session and error logs
+.jotter_session.json
+.editor_session.json
+jotter_error.log
+editor_error.log
+
+# Python cache
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+
+# Virtual environments
+.venv/
+venv/
+env/
+
+# OS files
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Editor/IDE
+.vscode/
+.idea/
+*.swp
+*.swo
