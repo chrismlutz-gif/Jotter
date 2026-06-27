@@ -983,7 +983,7 @@ class Editor(tk.Tk):
         hdr.pack(fill="x")
         tk.Label(hdr, text="Jotter", bg="#007acc", fg="#ffffff",
                  font=("Segoe UI", 22, "bold")).pack()
-        tk.Label(hdr, text="Version 1.0", bg="#007acc", fg="#cce4f7",
+        tk.Label(hdr, text="Version 1.2", bg="#007acc", fg="#cce4f7",
                  font=("Segoe UI", 10)).pack()
 
         # Body
