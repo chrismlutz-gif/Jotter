@@ -15,6 +15,9 @@ if errorlevel 1 (
     pause & exit /b 1
 )
 
+:: Use Windows Credential Manager so token is saved after first use
+git config --global credential.helper manager
+
 :: Stage files
 set FILES=editor.py jotter.ico jotter.spec jotter.iss build.bat push_to_github.bat README.md LICENSE .gitignore
 
@@ -47,15 +50,17 @@ if exist ".git" (
 :: Push
 echo.
 echo Pushing to https://github.com/chrismlutz-gif/Jotter ...
-echo If prompted, sign in with your GitHub username + a personal access token.
-echo (Create one at: https://github.com/settings/tokens -- tick 'repo')
+echo.
+echo NOTE: If prompted for a password, use a Personal Access Token -- NOT your GitHub password.
+echo       Create one at: https://github.com/settings/tokens
+echo       Click "Generate new token (classic)", tick "repo", copy the token, paste it here.
+echo       Windows will save it so you won't be asked again.
 echo.
 git push -u origin main
 
 if errorlevel 1 (
     echo.
-    echo Push failed. Most likely cause: authentication.
-    echo Use a personal access token as the password, not your GitHub password.
+    echo Push failed. See note above about Personal Access Tokens.
 ) else (
     echo.
     echo Done! Live at: https://github.com/chrismlutz-gif/Jotter

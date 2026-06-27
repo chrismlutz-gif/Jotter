@@ -21,7 +21,6 @@ A lightweight, dark-mode text editor built for speed and organisation.
 - **Word and character counter** — live count in the status bar
 - **File operations** — New, Open, Save, Save As, with unsaved-changes prompts
 - **Full undo/redo** — standard Ctrl+Z / Ctrl+Y
-- **Full Find/Replace** — standard Ctrl+F / Ctrl+R
 - **Always on top** — pin Jotter above other windows
 
 ---
@@ -30,7 +29,7 @@ A lightweight, dark-mode text editor built for speed and organisation.
 
 ### Option 1 — Run the installer (Windows)
 
-Download `JotterSetup.exe` from the [Releases](https://github.com/chrismlutz-gif/Jotter/releases) page and run it. Jotter will run.
+Download `JotterSetup.exe` from the [Releases](https://github.com/chrismlutz-gif/Jotter/releases) page and run it. Jotter will be added to your Start menu with an optional desktop shortcut.
 
 ### Option 2 — Run from source
 

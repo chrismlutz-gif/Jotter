@@ -1354,6 +1354,67 @@ class Editor(tk.Tk):
         body.pack(side="top", fill="both", expand=True)
         self._body = body
 
+    def _text_context(self, event, tab):
+        T   = self._T
+        txt = tab.text
+        kw  = dict(tearoff=0, bg=T["menu_bg"], fg=T["menu_fg"],
+                   activebackground=T["menu_sel"], activeforeground=T["menu_fg"])
+        m = tk.Menu(self, **kw)
+
+        # Undo / Redo
+        can_undo = False
+        can_redo = False
+        try:
+            txt.edit("canundo")
+            can_undo = True
+        except Exception:
+            pass
+        try:
+            txt.edit("canredo")
+            can_redo = True
+        except Exception:
+            pass
+        m.add_command(label="Undo",       command=lambda: txt.event_generate("<<Undo>>"),
+                      state="normal" if can_undo else "disabled")
+        m.add_command(label="Redo",       command=lambda: txt.event_generate("<<Redo>>"),
+                      state="normal" if can_redo else "disabled")
+        m.add_separator()
+
+        # Cut / Copy — only enabled when there's a selection
+        has_sel = bool(txt.tag_ranges("sel"))
+        m.add_command(label="Cut",        command=lambda: txt.event_generate("<<Cut>>"),
+                      state="normal" if has_sel else "disabled")
+        m.add_command(label="Copy",       command=lambda: txt.event_generate("<<Copy>>"),
+                      state="normal" if has_sel else "disabled")
+
+        # Paste — only enabled when clipboard has text
+        has_clip = False
+        try:
+            has_clip = bool(self.clipboard_get())
+        except Exception:
+            pass
+        m.add_command(label="Paste",      command=lambda: txt.event_generate("<<Paste>>"),
+                      state="normal" if has_clip else "disabled")
+        m.add_command(label="Delete",     command=lambda: txt.delete("sel.first", "sel.last")
+                      if has_sel else None,
+                      state="normal" if has_sel else "disabled")
+        m.add_separator()
+
+        # Select All
+        m.add_command(label="Select All", command=lambda: (
+            txt.tag_add("sel", "1.0", "end"),
+            txt.mark_set("insert", "end")))
+        m.add_separator()
+
+        # Find / Replace
+        m.add_command(label="Find...",    command=lambda: self._show_find_bar(False))
+        m.add_command(label="Replace...", command=lambda: self._show_find_bar(True))
+
+        try:
+            m.tk_popup(event.x_root, event.y_root)
+        finally:
+            m.grab_release()
+
     def _make_text_area(self, tab):
         T    = self._T
         frm  = tk.Frame(self._body, bg=T["bg"])
@@ -1381,6 +1442,7 @@ class Editor(tk.Tk):
         txt.bind("<<Modified>>", lambda e, t=tab: self._on_modified(t))
         txt.bind("<KeyRelease>", lambda e, t=tab: self._update_linenos(t))
         txt.bind("<MouseWheel>", lambda e, t=tab: self.after(1, lambda: self._update_linenos(t)))
+        txt.bind("<Button-3>", lambda e, t=tab: self._text_context(e, t))
 
     def _on_modified(self, tab):
         if tab.text and tab.text.edit_modified():
@@ -1535,7 +1597,10 @@ class Editor(tk.Tk):
         except Exception:
             return False
         groups_by_id = {}
-        for gid, gdata in data.get("groups", {}).items():
+        raw_groups = data.get("groups", {})
+        if not isinstance(raw_groups, dict):
+            raw_groups = {}
+        for gid, gdata in raw_groups.items():
             grp = TabGroup()
             grp.label     = gdata.get("name", "Group")
             grp.color     = gdata.get("color")
