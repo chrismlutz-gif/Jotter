@@ -1204,7 +1204,7 @@ class Editor(tk.Tk):
             sel_start = tw.index("sel.first")
             sel_end   = tw.index("sel.last")
         except tk.TclError:
-            return
+            sel_start, sel_end = "1.0", "end"
         for tag in tw.tag_names():
             if tag.startswith("fmt_"):
                 tw.tag_remove(tag, sel_start, sel_end)
