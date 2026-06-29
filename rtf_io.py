@@ -254,6 +254,23 @@ def parse_rtf(widget, rtf_string):
 # RTF WRITER
 # ---------------------------------------------------------------------------
 
+def _rtf_escape(ch):
+    """Escape a single character for RTF output."""
+    if ch == '\\': return r'\\'
+    if ch == '{':  return r'\{'
+    if ch == '}':  return r'\}'
+    if ch == '\n': return r'\par' + '\n'
+    if ch == '\t': return r'\tab '
+    code = ord(ch)
+    if code <= 127:
+        return ch
+    # Non-ASCII: emit as \'xx
+    if code <= 255:
+        return "\\'%02x" % code
+    # Unicode fallback
+    return "\\u%d?" % code
+
+
 def generate_rtf(widget):
     """Serialize *widget* content + tags back to an RTF string."""
     content = widget.get("1.0", "end-1c")

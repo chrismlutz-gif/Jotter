@@ -263,6 +263,15 @@ class Editor(tk.Tk):
                    lambda e: canvas.configure(scrollregion=canvas.bbox("all")))
         self._drop_canvas  = canvas
         self._drop_line_id = None
+        # "+" new-tab button pinned to the right of the bar
+        plus = tk.Label(outer, text="  ＋  ", bg=T["tab_idle"], fg=T["text_fg"],
+                        font=("Segoe UI", 13, "bold"), cursor="hand2",
+                        relief="flat", padx=2, pady=3)
+        plus.pack(side="right", padx=6, pady=3)
+        plus.bind("<Button-1>", lambda e: self.cmd_new_tab())
+        plus.bind("<Enter>", lambda e: plus.configure(bg=T["tab_hover"]))
+        plus.bind("<Leave>", lambda e: plus.configure(bg=T["tab_idle"]))
+        ToolTip(plus, "New tab  (Ctrl+N)")
 
     def _rebuild_tab_buttons(self):
         T = self._T
@@ -810,6 +819,31 @@ class Editor(tk.Tk):
                      font=("Consolas", 9), width=16, anchor="e").pack(side="left")
             tk.Label(row, text="  " + desc, bg=T["bg"], fg=T["text_fg"],
                      font=("Segoe UI", 9), anchor="w").pack(side="left")
+        tk.Frame(win, bg=T["border"], height=1).pack(fill="x", padx=20, pady=(8,0))
+        mit = (
+            "MIT License\n"
+            "Copyright (c) 2024 Chris Lutz\n\n"
+            "Permission is hereby granted, free of charge, to any person\n"
+            "obtaining a copy of this software and associated documentation\n"
+            "files (the Software), to deal in the Software without restriction,\n"
+            "including without limitation the rights to use, copy, modify,\n"
+            "merge, publish, distribute, sublicense, and/or sell copies of\n"
+            "the Software, and to permit persons to whom the Software is\n"
+            "furnished to do so, subject to the following conditions:\n\n"
+            "The above copyright notice and this permission notice shall be\n"
+            "included in all copies or substantial portions of the Software.\n\n"
+            "THE SOFTWARE IS PROVIDED AS IS, WITHOUT WARRANTY OF ANY KIND,\n"
+            "EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES\n"
+            "OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND\n"
+            "NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT\n"
+            "HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY,\n"
+            "WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING\n"
+            "FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR\n"
+            "OTHER DEALINGS IN THE SOFTWARE."
+        )
+        tk.Label(win, text=mit, bg=T["bg"], fg=T["close_fg"],
+                 font=("Consolas", 8), justify="left",
+                 padx=20, pady=8).pack(anchor="w")
         tk.Button(win, text="Close", command=win.destroy,
                   bg=T["tab_idle"], fg=T["text_fg"], relief="flat",
                   padx=20, pady=4).pack(pady=(4,14))
@@ -1668,6 +1702,7 @@ class Editor(tk.Tk):
         if not self._tabs:
             return False
 
+        self._rebuild_tab_buttons()
         self._rebuild_tab_buttons()
         self._activate(active_tab or self._tabs[-1])
         return True
