@@ -31,7 +31,7 @@ THEMES = {
     "dark": {
         "bg": "#1e1e1e", "tab_bar": "#252526", "tab_idle": "#2d2d2d",
         "tab_active": "#1e1e1e", "tab_hover": "#383838",
-        "text_bg": "#1e1e1e", "text_fg": "#d4d4d4", "text_sel": "#264f78",
+        "text_bg": "#ffffcc", "text_fg": "#000000", "text_sel": "#264f78",
         "ln_bg": "#252526", "ln_fg": "#858585",
         "status_bg": "#007acc", "status_fg": "#ffffff",
         "border": "#474747", "close_fg": "#858585",
@@ -41,7 +41,7 @@ THEMES = {
     "light": {
         "bg": "#ffffff", "tab_bar": "#f3f3f3", "tab_idle": "#ececec",
         "tab_active": "#ffffff", "tab_hover": "#e0e0e0",
-        "text_bg": "#ffffff", "text_fg": "#1e1e1e", "text_sel": "#add6ff",
+        "text_bg": "#ffffcc", "text_fg": "#000000", "text_sel": "#add6ff",
         "ln_bg": "#f3f3f3", "ln_fg": "#999999",
         "status_bg": "#007acc", "status_fg": "#ffffff",
         "border": "#cccccc", "close_fg": "#717171",

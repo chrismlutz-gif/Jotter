@@ -369,10 +369,10 @@ def generate_rtf(widget):
                 fi = get_fi(fn) + 1 if fn else 0
                 ctrl.append(r'\f%d' % fi); prev['fn'] = fn
             if fg != prev['fg']:
-                ci2 = get_ci(fg) + 1 if fg else 0
+                ci2 = get_ci(fg) if fg else 0
                 ctrl.append(r'\cf%d' % ci2); prev['fg'] = fg
             if bg != prev['bg']:
-                ci2 = get_ci(bg) + 1 if bg else 0
+                ci2 = get_ci(bg) if bg else 0
                 ctrl.append(r'\highlight%d' % ci2); prev['bg'] = bg
             if al != prev['al']:
                 ql = {'left': r'\ql', 'center': r'\qc', 'right': r'\qr'}.get(al, r'\ql')
