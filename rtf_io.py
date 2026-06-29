@@ -383,17 +383,5 @@ def generate_rtf(widget):
             body.append(_rtf_escape(char))
 
     body.append(r'\par' + '\n}')
-    header = [r'{\rtf1\ansi\deff0']
-    header.append(r'{\fonttbl')
-    for fn2, fi2 in sorted(font_idx.items(), key=lambda x: x[1]):
-        header.append(r'{\f%d\fnil\fcharset0 %s;}' % (fi2, fn2))
-    header.append('}')
-    header.append(r'{\colortbl ;')
-    for rgb, ci2 in sorted(color_idx.items(), key=lambda x: x[1]):
-        r2 = int(rgb[1:3], 16)
-        g2 = int(rgb[3:5], 16)
-        b2 = int(rgb[5:7], 16)
-        header.append(r'\red%d\green%d\blue%d;' % (r2, g2, b2))
-    header.append('}')
-    header.append(r'\f0\fs22\ql' + '\n')
-    return '\n'.join(header) + '\n' + ''.join(body)
+    buf.append(r'\pard\ql' + '\n')
+    return ''.join(buf) + ''.join(body)
