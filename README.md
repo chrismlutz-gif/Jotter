@@ -30,9 +30,9 @@ A lightweight, dark-mode text editor built for speed and organisation.
 
 ## Installation
 
-### Option 1 — Run the installer (Windows)
+### Option 1 — Run the application (Windows)
 
-Download `JotterSetup.exe` from the [Releases](https://github.com/chrismlutz-gif/Jotter/releases) page and run it. Jotter will run.
+Download `Jotter.exe` from the [Releases](https://github.com/chrismlutz-gif/Jotter/releases) page and run it. Jotter will run.
 
 ### Option 2 — Run from source
 
