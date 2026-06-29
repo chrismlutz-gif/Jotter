@@ -36,7 +36,7 @@ THEMES = {
         "status_bg": "#007acc", "status_fg": "#ffffff",
         "border": "#474747", "close_fg": "#858585",
         "menu_bg": "#252526", "menu_fg": "#cccccc", "menu_sel": "#094771",
-        "drop_line": "#ffffff", "default_dot": "#569cd6",
+        "drop_line": "#ffffff", "default_dot": "#569cd6", "toolbar_fg": "#cccccc",
     },
     "light": {
         "bg": "#ffffff", "tab_bar": "#f3f3f3", "tab_idle": "#ececec",
@@ -46,7 +46,7 @@ THEMES = {
         "status_bg": "#007acc", "status_fg": "#ffffff",
         "border": "#cccccc", "close_fg": "#717171",
         "menu_bg": "#f3f3f3", "menu_fg": "#1e1e1e", "menu_sel": "#0060c0",
-        "drop_line": "#333333", "default_dot": "#0078d4",
+        "drop_line": "#333333", "default_dot": "#0078d4", "toolbar_fg": "#555555",
     },
 }
 
@@ -264,7 +264,7 @@ class Editor(tk.Tk):
         self._drop_canvas  = canvas
         self._drop_line_id = None
         # "+" new-tab button pinned to the right of the bar
-        plus = tk.Label(outer, text="  ＋  ", bg=T["tab_idle"], fg=T["text_fg"],
+        plus = tk.Label(outer, text="  ＋  ", bg=T["tab_idle"], fg=T["toolbar_fg"],
                         font=("Segoe UI", 13, "bold"), cursor="hand2",
                         relief="flat", padx=2, pady=3)
         plus.pack(side="right", padx=6, pady=3)
@@ -343,7 +343,7 @@ class Editor(tk.Tk):
         oid = dot.create_oval(1,1,9,9, fill=dot_color, outline="")
         tab.dot_canvas = dot
         tab.oval_id   = oid
-        title_lbl = tk.Label(frm, text=tab.title, bg=bg, fg=T["text_fg"],
+        title_lbl = tk.Label(frm, text=tab.title, bg=bg, fg=T["toolbar_fg"],
                              font=("Segoe UI", 10), padx=2)
         title_lbl.pack(side="left", pady=4)
         tab.title_lbl = title_lbl
@@ -986,7 +986,7 @@ class Editor(tk.Tk):
                                              int(self._size_var.get())))
         ToolTip(sc, "Font size (pt)\nApplied to selected text")
 
-        btn_kw = dict(bg=T["tab_idle"], fg=T["text_fg"],
+        btn_kw = dict(bg=T["tab_idle"], fg=T["toolbar_fg"],
                       relief="flat", padx=6, pady=2,
                       cursor="hand2")
 
@@ -1043,7 +1043,7 @@ class Editor(tk.Tk):
             fill="#ff0000", outline="")
         self._fg_swatch.bind("<Button-1>", lambda e: self._fmt_pick_fg())
         ToolTip(self._fg_swatch, "Text color\nClick to choose color")
-        tk.Label(bar, text="A", bg=T["tab_idle"], fg=T["text_fg"],
+        tk.Label(bar, text="A", bg=T["tab_idle"], fg=T["toolbar_fg"],
                  font=("Segoe UI", 9)).pack(side="left")
 
         self._bg_swatch = tk.Canvas(bar, width=22, height=22,
@@ -1054,7 +1054,7 @@ class Editor(tk.Tk):
             fill="#ffff00", outline="")
         self._bg_swatch.bind("<Button-1>", lambda e: self._fmt_pick_bg())
         ToolTip(self._bg_swatch, "Highlight color\nClick to choose color")
-        tk.Label(bar, text="HL", bg=T["tab_idle"], fg=T["text_fg"],
+        tk.Label(bar, text="HL", bg=T["tab_idle"], fg=T["toolbar_fg"],
                  font=("Segoe UI", 9)).pack(side="left")
 
         tk.Label(bar, text=" ", bg=T["tab_bar"]).pack(side="left", padx=4)
@@ -1068,9 +1068,9 @@ class Editor(tk.Tk):
         self._wrap_on = tk.BooleanVar(value=True)
         wrap_btn = tk.Checkbutton(bar, text="↵ Wrap", font=("Segoe UI", 10),
             variable=self._wrap_on, command=self._toggle_wrap,
-            bg=T["tab_bar"], fg=T["text_fg"],
+            bg=T["tab_bar"], fg=T["toolbar_fg"],
             selectcolor=T["tab_idle"], activebackground=T["tab_bar"],
-            activeforeground=T["text_fg"],
+            activeforeground=T["toolbar_fg"],
             indicatoron=False, relief="flat", padx=6, pady=2,
             cursor="hand2")
         wrap_btn.pack(side="left", padx=(8,1))
@@ -1260,7 +1260,7 @@ class Editor(tk.Tk):
         bar = tk.Frame(self, bg=T["tab_bar"], pady=3)
         self._findbar = bar
 
-        tk.Label(bar, text="Find:", bg=T["tab_bar"], fg=T["text_fg"],
+        tk.Label(bar, text="Find:", bg=T["tab_bar"], fg=T["toolbar_fg"],
                  font=("Segoe UI", 10)).pack(side="left", padx=(6,2))
         self._find_var = tk.StringVar()
         fe = tk.Entry(bar, textvariable=self._find_var, width=22,
@@ -1276,31 +1276,31 @@ class Editor(tk.Tk):
                                    fg=T["close_fg"], font=("Segoe UI", 9))
         self._match_lbl.pack(side="left", padx=4)
 
-        tk.Button(bar, text="▲", bg=T["tab_idle"], fg=T["text_fg"],
+        tk.Button(bar, text="▲", bg=T["tab_idle"], fg=T["toolbar_fg"],
                   relief="flat", padx=4,
                   command=lambda: self._find_step(-1)).pack(side="left", padx=1)
-        tk.Button(bar, text="▼", bg=T["tab_idle"], fg=T["text_fg"],
+        tk.Button(bar, text="▼", bg=T["tab_idle"], fg=T["toolbar_fg"],
                   relief="flat", padx=4,
                   command=lambda: self._find_step(1)).pack(side="left", padx=1)
 
         self._replace_var = tk.StringVar()
         self._replace_lbl = tk.Label(bar, text="Replace:", bg=T["tab_bar"],
-                                     fg=T["text_fg"], font=("Segoe UI", 10))
+                                     fg=T["toolbar_fg"], font=("Segoe UI", 10))
         re_entry = tk.Entry(bar, textvariable=self._replace_var, width=22,
                             bg=T["text_bg"], fg=T["text_fg"],
                             insertbackground=T["text_fg"], relief="flat", bd=2)
         self._replace_entry = re_entry
 
         self._replace_btn = tk.Button(bar, text="Replace",
-            bg=T["tab_idle"], fg=T["text_fg"], relief="flat", padx=6,
+            bg=T["tab_idle"], fg=T["toolbar_fg"], relief="flat", padx=6,
             command=self._do_replace)
         self._replace_all_btn = tk.Button(bar, text="Replace All",
-            bg=T["tab_idle"], fg=T["text_fg"], relief="flat", padx=6,
+            bg=T["tab_idle"], fg=T["toolbar_fg"], relief="flat", padx=6,
             command=self._do_replace_all)
 
         self._case_var = tk.BooleanVar(value=False)
         tk.Checkbutton(bar, text="Aa", variable=self._case_var,
-                       bg=T["tab_bar"], fg=T["text_fg"],
+                       bg=T["tab_bar"], fg=T["toolbar_fg"],
                        selectcolor=T["tab_idle"], activebackground=T["tab_bar"],
                        command=self._run_find).pack(side="left", padx=4)
 
