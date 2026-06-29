@@ -22,6 +22,9 @@ A lightweight, dark-mode text editor built for speed and organisation.
 - **File operations** — New, Open, Save, Save As, with unsaved-changes prompts
 - **Full undo/redo** — standard Ctrl+Z / Ctrl+Y
 - **Always on top** — pin Jotter above other windows
+- **TXT/RTF** — work with both TXT and RTF files side by side
+- **Text formatting** — RTF files allow for basic text formatting features
+
 
 ---
 
@@ -29,7 +32,7 @@ A lightweight, dark-mode text editor built for speed and organisation.
 
 ### Option 1 — Run the installer (Windows)
 
-Download `JotterSetup.exe` from the [Releases](https://github.com/chrismlutz-gif/Jotter/releases) page and run it. Jotter will be added to your Start menu with an optional desktop shortcut.
+Download `JotterSetup.exe` from the [Releases](https://github.com/chrismlutz-gif/Jotter/releases) page and run it. Jotter will run.
 
 ### Option 2 — Run from source
 
@@ -38,7 +41,9 @@ Download `JotterSetup.exe` from the [Releases](https://github.com/chrismlutz-gif
 ```bash
 git clone https://github.com/chrismlutz-gif/jotter.git
 cd jotter
-python editor.py
+editor.py
+rtf_io.py
+
 ```
 
 No additional packages are needed to run from source.
@@ -56,30 +61,33 @@ build.bat
 
 This will:
 - Install PyInstaller (if not already present)
-- Bundle `editor.py` into `dist\Jotter.exe`
+- Bundle rtf_io.py and `editor.py` into `dist\Jotter.exe`
 - Compile `installer\JotterSetup.exe` via Inno Setup
 
 ---
 
 ## Controls
 
-| Action | Result |
-|---|---|
-| Drag a tab | Reorder it in the bar |
-| Drag onto another tab | Group the two tabs together |
-| Drag out of a group | Ungroup that tab |
-| Drag one group onto another | Merge the groups |
-| Click group strip / label | Collapse or expand the group |
-| Double-click group label | Rename the group |
-| Right-click a tab | Rename, recolour, or close it |
-| Right-click group strip | Recolour, rename, or ungroup |
-| Click the colour dot | Pick a tab accent colour |
-| **Ctrl+N** | New tab |
-| **Ctrl+W** | Close tab |
-| **Ctrl+O** | Open file |
-| **Ctrl+S** | Save file |
-| **Ctrl+Shift+S** | Save As |
-| **Ctrl+Z / Ctrl+Y** | Undo / Redo |
+("Ctrl+N",          "New tab")
+("Ctrl+O",          "Open .txt or .rtf file")
+("Ctrl+S",          "Save")
+("Ctrl+Shift+S",    "Save As")
+("Ctrl+W",          "Close tab")
+("Ctrl+F",          "Find")
+("Ctrl+H",          "Find & Replace")
+("Ctrl+B",          "Bold")
+("Ctrl+I",          "Italic")
+("Ctrl+U",          "Underline")
+("Drag tab",        "Reorder or group tabs")
+("Right-click tab", "Rename, color, text background, close")
+("Right-click text","Cut / Copy / Paste / Format / Case")
+("Toolbar",         "Font family & size, Aa▾ case, B / I / U / S̶")
+("Toolbar",         "Text & highlight color, alignment, ↵ Wrap")
+("Hover controls",  "Tooltips on all toolbar controls")
+("Aa▾",             "Change case: UPPER / lower / Capitalize / tOGGLE")
+("S̶  button",       "Strikethrough formatting")
+("↵ Wrap",          "Toggle word wrap per tab")
+("✕ fmt",           "Clear all formatting from selection")
 
 ---
 
@@ -88,6 +96,7 @@ This will:
 ```
 jotter/
 ├── editor.py        # Main application source
+├── rtf_io.py        # Main application RTF resource
 ├── jotter.ico       # Application icon
 ├── jotter.spec      # PyInstaller build spec
 ├── jotter.iss       # Inno Setup installer script

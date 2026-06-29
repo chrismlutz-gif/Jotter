@@ -1,34 +1,22 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-editor.py -- Dark-mode text editor
+editor.py -- Jotter  v2.0
   * Multiple tabs with drag-to-reorder and drag-to-group
-  * Visual ghost tab follows cursor while dragging
-  * Drag a tab out of a group to ungroup it
-  * Per-tab accent colour (click the dot or right-click > Change Color)
-  * Per-group accent colour  (right-click the group strip)
-  * Group labels shown in header, renameable via double-click
-  * Dark / light mode toggle  (Options menu)
-  * Always-on-top toggle      (Options menu)
-  * Line numbers, word & character counter in status bar
-  * File operations: New, Open, Save, Save As
-  * Undo / redo, cut / copy / paste, select all
-  * Session persistence across restarts
-  * Group drag-to-reorder and drag-to-merge
+  * Per-tab accent colour, text background, text foreground
+  * RTF read/write with formatting toolbar
+  * Find / Replace bar
+  * Dark / light mode, Always-on-top
+  * Session persistence
 """
 
 import tkinter as tk
 from tkinter import filedialog, messagebox, colorchooser, simpledialog, font as tkfont
 from tkinter import ttk
-import os
-import sys
-import json
+import os, sys, json
 import rtf_io
 
 def _data_dir():
-    """Return a writable directory for persistent data.
-    When frozen by PyInstaller use AppData\\Roaming\\Jotter;
-    otherwise use the directory containing this script."""
     if getattr(sys, "frozen", False):
         base = os.environ.get("APPDATA") or os.path.expanduser("~")
         d = os.path.join(base, "Jotter")
@@ -39,75 +27,90 @@ def _data_dir():
 
 SESSION_FILE = os.path.join(_data_dir(), ".jotter_session.json")
 
-# ---------------------------------------------------------------------------
-# Themes
-# ---------------------------------------------------------------------------
 THEMES = {
     "dark": {
-        "bg":           "#1e1e1e",
-        "tab_bar":      "#252526",
-        "tab_idle":     "#2d2d2d",
-        "tab_active":   "#1e1e1e",
-        "tab_hover":    "#383838",
-        "text_bg":      "#1e1e1e",
-        "text_fg":      "#d4d4d4",
-        "text_sel":     "#264f78",
-        "ln_bg":        "#252526",
-        "ln_fg":        "#858585",
-        "status_bg":    "#007acc",
-        "status_fg":    "#ffffff",
-        "border":       "#474747",
-        "close_fg":     "#858585",
-        "menu_bg":      "#252526",
-        "menu_fg":      "#cccccc",
-        "menu_sel":     "#094771",
-        "drop_line":    "#ffffff",
-        "default_dot":  "#569cd6",
+        "bg": "#1e1e1e", "tab_bar": "#252526", "tab_idle": "#2d2d2d",
+        "tab_active": "#1e1e1e", "tab_hover": "#383838",
+        "text_bg": "#1e1e1e", "text_fg": "#d4d4d4", "text_sel": "#264f78",
+        "ln_bg": "#252526", "ln_fg": "#858585",
+        "status_bg": "#007acc", "status_fg": "#ffffff",
+        "border": "#474747", "close_fg": "#858585",
+        "menu_bg": "#252526", "menu_fg": "#cccccc", "menu_sel": "#094771",
+        "drop_line": "#ffffff", "default_dot": "#569cd6",
     },
     "light": {
-        "bg":           "#ffffff",
-        "tab_bar":      "#f3f3f3",
-        "tab_idle":     "#ececec",
-        "tab_active":   "#ffffff",
-        "tab_hover":    "#e0e0e0",
-        "text_bg":      "#ffffff",
-        "text_fg":      "#1e1e1e",
-        "text_sel":     "#add6ff",
-        "ln_bg":        "#f3f3f3",
-        "ln_fg":        "#999999",
-        "status_bg":    "#007acc",
-        "status_fg":    "#ffffff",
-        "border":       "#cccccc",
-        "close_fg":     "#717171",
-        "menu_bg":      "#f3f3f3",
-        "menu_fg":      "#1e1e1e",
-        "menu_sel":     "#0060c0",
-        "drop_line":    "#333333",
-        "default_dot":  "#0078d4",
+        "bg": "#ffffff", "tab_bar": "#f3f3f3", "tab_idle": "#ececec",
+        "tab_active": "#ffffff", "tab_hover": "#e0e0e0",
+        "text_bg": "#ffffff", "text_fg": "#1e1e1e", "text_sel": "#add6ff",
+        "ln_bg": "#f3f3f3", "ln_fg": "#999999",
+        "status_bg": "#007acc", "status_fg": "#ffffff",
+        "border": "#cccccc", "close_fg": "#717171",
+        "menu_bg": "#f3f3f3", "menu_fg": "#1e1e1e", "menu_sel": "#0060c0",
+        "drop_line": "#333333", "default_dot": "#0078d4",
     },
 }
 
-_ACCENT_CYCLE = [
-    "#569cd6", "#4ec9b0", "#dcdcaa", "#ce9178",
-    "#9cdcfe", "#c586c0", "#f48771", "#b5cea8",
-]
+_ACCENT_CYCLE = ["#569cd6","#4ec9b0","#dcdcaa","#ce9178",
+                 "#9cdcfe","#c586c0","#f48771","#b5cea8"]
+_GROUP_COLORS = ["#e06c75","#e5c07b","#98c379","#56b6c2",
+                 "#61afef","#c678dd","#d19a66"]
 
-_GROUP_COLORS = [
-    "#e06c75", "#e5c07b", "#98c379", "#56b6c2",
-    "#61afef", "#c678dd", "#d19a66",
-]
 
-# ---------------------------------------------------------------------------
-# Data classes
-# ---------------------------------------------------------------------------
+class ToolTip:
+    """Simple hover tooltip for any widget."""
+    def __init__(self, widget, text, delay=600):
+        self._widget  = widget
+        self._text    = text
+        self._delay   = delay
+        self._job     = None
+        self._tip_win = None
+        widget.bind("<Enter>",  self._on_enter,  add="+")
+        widget.bind("<Leave>",  self._on_leave,  add="+")
+        widget.bind("<ButtonPress>", self._on_leave, add="+")
+
+    def _on_enter(self, event=None):
+        self._cancel()
+        self._job = self._widget.after(self._delay, self._show)
+
+    def _on_leave(self, event=None):
+        self._cancel()
+        self._hide()
+
+    def _cancel(self):
+        if self._job:
+            self._widget.after_cancel(self._job)
+            self._job = None
+
+    def _show(self):
+        if self._tip_win:
+            return
+        w = self._widget
+        x = w.winfo_rootx() + w.winfo_width() // 2
+        y = w.winfo_rooty() + w.winfo_height() + 4
+        self._tip_win = tw = tk.Toplevel(w)
+        tw.wm_overrideredirect(True)
+        tw.wm_geometry("+%d+%d" % (x, y))
+        tw.attributes("-topmost", True)
+        lbl = tk.Label(tw, text=self._text, justify="left",
+                       background="#ffffe0", foreground="#000000",
+                       relief="solid", borderwidth=1,
+                       font=("Segoe UI", 9), padx=5, pady=3)
+        lbl.pack()
+
+    def _hide(self):
+        if self._tip_win:
+            self._tip_win.destroy()
+            self._tip_win = None
+
+
 class TabGroup:
     _ctr = 0
     def __init__(self, color=None):
         TabGroup._ctr += 1
-        self.id        = TabGroup._ctr
-        self.color     = color or _GROUP_COLORS[(TabGroup._ctr - 1) % len(_GROUP_COLORS)]
-        self.collapsed = False
-        self.label     = "Group %d" % TabGroup._ctr
+        self.id           = TabGroup._ctr
+        self.color        = color or _GROUP_COLORS[(TabGroup._ctr-1) % len(_GROUP_COLORS)]
+        self.collapsed    = False
+        self.label        = "Group %d" % TabGroup._ctr
         self.container    = None
         self.strip        = None
         self.inner        = None
@@ -137,9 +140,6 @@ class Tab:
         self.close_lbl  = None
 
 
-# ---------------------------------------------------------------------------
-# Main editor window
-# ---------------------------------------------------------------------------
 class Editor(tk.Tk):
 
     def __init__(self):
@@ -153,15 +153,12 @@ class Editor(tk.Tk):
         self._T             = THEMES["dark"]
         self._tabs          = []
         self._active        = None
-        self._accent_idx    = 0
-
         self._drag_tab      = None
         self._drag_start_x  = 0
         self._drag_moved    = False
         self._press_on_dot  = False
         self._drop_item     = None
         self._ghost         = None
-
         self._drag_group       = None
         self._drag_grp_start_x = 0
         self._drag_grp_moved   = False
@@ -181,17 +178,20 @@ class Editor(tk.Tk):
         self.bind("<Control-w>", lambda _e: self.cmd_close_tab())
         self.bind("<Control-f>", lambda _e: self._show_find_bar(False))
         self.bind("<Control-h>", lambda _e: self._show_find_bar(True))
-        self.bind("<Control-b>", lambda _e: self._fmt_toggle(rtf_io.tag_bold(), font=("Consolas",11,"bold")))
-        self.bind("<Control-i>", lambda _e: self._fmt_toggle(rtf_io.tag_italic(), font=("Consolas",11,"italic")))
-        self.bind("<Control-u>", lambda _e: self._fmt_toggle(rtf_io.tag_underline(), underline=True))
+        self.bind("<Control-b>", lambda _e: self._fmt_toggle(
+            rtf_io.tag_bold(), font=("Consolas",11,"bold")))
+        self.bind("<Control-i>", lambda _e: self._fmt_toggle(
+            rtf_io.tag_italic(), font=("Consolas",11,"italic")))
+        self.bind("<Control-u>", lambda _e: self._fmt_toggle(
+            rtf_io.tag_underline(), underline=True))
         self.protocol("WM_DELETE_WINDOW", self._on_quit)
 
         if not self._load_session():
             self.cmd_new_tab()
 
-    # ------------------------------------------------------------------
+    # ----------------------------------------------------------------
     # Menu
-    # ------------------------------------------------------------------
+    # ----------------------------------------------------------------
     def _build_menu(self):
         T  = self._T
         kw = dict(tearoff=0, bg=T["menu_bg"], fg=T["menu_fg"],
@@ -201,22 +201,27 @@ class Editor(tk.Tk):
         self.configure(menu=mb)
 
         fm = tk.Menu(mb, **kw)
-        fm.add_command(label="New Tab          Ctrl+N",       command=self.cmd_new_tab)
-        fm.add_command(label="Open...          Ctrl+O",       command=self.cmd_open)
+        fm.add_command(label="New Tab       Ctrl+N", command=self.cmd_new_tab)
+        fm.add_command(label="Open...       Ctrl+O", command=self.cmd_open)
         fm.add_separator()
-        fm.add_command(label="Save             Ctrl+S",       command=self.cmd_save)
-        fm.add_command(label="Save As...       Ctrl+Shift+S", command=self.cmd_save_as)
+        fm.add_command(label="Save          Ctrl+S", command=self.cmd_save)
+        fm.add_command(label="Save As...    Ctrl+Shift+S", command=self.cmd_save_as)
         fm.add_separator()
-        fm.add_command(label="Close Tab        Ctrl+W",       command=self.cmd_close_tab)
+        fm.add_command(label="Close Tab     Ctrl+W", command=self.cmd_close_tab)
         mb.add_cascade(label="File", menu=fm)
 
         em = tk.Menu(mb, **kw)
-        em.add_command(label="Undo  Ctrl+Z", command=lambda: self.focus_get() and self.focus_get().event_generate("<<Undo>>"))
-        em.add_command(label="Redo  Ctrl+Y", command=lambda: self.focus_get() and self.focus_get().event_generate("<<Redo>>"))
+        em.add_command(label="Undo  Ctrl+Z",
+            command=lambda: self.focus_get() and self.focus_get().event_generate("<<Undo>>"))
+        em.add_command(label="Redo  Ctrl+Y",
+            command=lambda: self.focus_get() and self.focus_get().event_generate("<<Redo>>"))
         em.add_separator()
-        em.add_command(label="Cut   Ctrl+X",  command=lambda: self.focus_get() and self.focus_get().event_generate("<<Cut>>"))
-        em.add_command(label="Copy  Ctrl+C",  command=lambda: self.focus_get() and self.focus_get().event_generate("<<Copy>>"))
-        em.add_command(label="Paste Ctrl+V",  command=lambda: self.focus_get() and self.focus_get().event_generate("<<Paste>>"))
+        em.add_command(label="Cut   Ctrl+X",
+            command=lambda: self.focus_get() and self.focus_get().event_generate("<<Cut>>"))
+        em.add_command(label="Copy  Ctrl+C",
+            command=lambda: self.focus_get() and self.focus_get().event_generate("<<Copy>>"))
+        em.add_command(label="Paste Ctrl+V",
+            command=lambda: self.focus_get() and self.focus_get().event_generate("<<Paste>>"))
         em.add_separator()
         em.add_command(label="Select All Ctrl+A", command=self._select_all)
         em.add_separator()
@@ -225,208 +230,153 @@ class Editor(tk.Tk):
         mb.add_cascade(label="Edit", menu=em)
 
         om = tk.Menu(mb, **kw)
-        om.add_checkbutton(label="Dark Mode",      command=self.cmd_toggle_theme)
-        om.add_checkbutton(label="Always on Top",  variable=self._always_on_top,
-                           command=lambda: self.attributes("-topmost", self._always_on_top.get()))
+        om.add_checkbutton(label="Dark Mode", command=self.cmd_toggle_theme)
+        om.add_checkbutton(label="Always on Top", variable=self._always_on_top,
+            command=lambda: self.attributes("-topmost", self._always_on_top.get()))
         mb.add_cascade(label="Options", menu=om)
 
         hm = tk.Menu(mb, **kw)
         hm.add_command(label="About Jotter...", command=self._show_about)
         mb.add_cascade(label="Help", menu=hm)
 
-    def _txt_ev(self, seq, fn):
-        if self._active and self._active.text:
-            self._active.text.bind(seq, fn)
-
     def _select_all(self, event=None):
         if self._active and self._active.text:
-            t = self._active.text
-            t.tag_add("sel", "1.0", "end")
-            t.mark_set("insert", "1.0")
-            t.see("insert")
+            self._active.text.tag_add("sel", "1.0", "end")
+            self._active.text.mark_set("insert", "end")
 
-    # ------------------------------------------------------------------
+    # ----------------------------------------------------------------
     # Tab bar
-    # ------------------------------------------------------------------
+    # ----------------------------------------------------------------
     def _build_tab_bar(self):
         T = self._T
-        outer = tk.Frame(self, bg=T["tab_bar"], height=41)
+        outer = tk.Frame(self, bg=T["tab_bar"])
         outer.pack(side="top", fill="x")
-        outer.pack_propagate(False)
         self._bar_outer = outer
-
-        canvas = tk.Canvas(outer, bg=T["tab_bar"], highlightthickness=0, bd=0)
+        canvas = tk.Canvas(outer, bg=T["tab_bar"], height=36,
+                           highlightthickness=0, bd=0)
         canvas.pack(side="left", fill="both", expand=True)
         self._bar_canvas = canvas
-
         inner = tk.Frame(canvas, bg=T["tab_bar"])
-        canvas.create_window((0, 0), window=inner, anchor="nw")
         self._bar_inner = inner
-
-        plus = tk.Label(outer, text=" + ", bg=T["tab_bar"],
-                        fg=T["close_fg"], font=("Segoe UI", 14), cursor="hand2")
-        plus.pack(side="right", padx=4)
-        plus.bind("<Button-1>", lambda _e: self.cmd_new_tab())
-        self._plus = plus
-
-        canvas.bind("<Configure>",
-                    lambda e: canvas.configure(
-                        scrollregion=canvas.bbox("all")))
+        canvas.create_window((0,0), window=inner, anchor="nw")
+        inner.bind("<Configure>",
+                   lambda e: canvas.configure(scrollregion=canvas.bbox("all")))
+        self._drop_canvas  = canvas
+        self._drop_line_id = None
 
     def _rebuild_tab_buttons(self):
         T = self._T
         for w in self._bar_inner.winfo_children():
             w.destroy()
-
-        seen_groups = []
-        i = 0
-        while i < len(self._tabs):
-            tab = self._tabs[i]
-            if tab.group is None:
-                self._make_tab_btn(tab, self._bar_inner)
-                i += 1
-            else:
-                grp = tab.group
+        seen_groups = {}
+        for tab in self._tabs:
+            grp = tab.group
+            if grp is not None:
                 if grp not in seen_groups:
-                    seen_groups.append(grp)
-                    grp_tabs = [t for t in self._tabs if t.group is grp]
-                    self._make_group_container(grp, grp_tabs, self._bar_inner)
-                i += 1
-
+                    con = self._make_group_container(grp,
+                        [t for t in self._tabs if t.group is grp],
+                        self._bar_inner)
+                    grp.container = con
+                    seen_groups[grp] = con
+                    con.pack(side="left", padx=2, pady=2)
+                if not grp.collapsed:
+                    self._make_tab_btn(tab, grp.inner)
+            else:
+                self._make_tab_btn(tab, self._bar_inner)
+        self._update_bar_height()
         self._restore_active_highlight()
-        self.after(1, self._update_bar_height)
 
     def _update_bar_height(self):
         self._bar_inner.update_idletasks()
-        h = max(self._bar_inner.winfo_reqheight(), 41)
-        self._bar_outer.configure(height=h)
-        self._bar_canvas.configure(height=h)
-        self._bar_canvas.configure(scrollregion=self._bar_canvas.bbox("all"))
+        h = self._bar_inner.winfo_reqheight()
+        self._bar_canvas.configure(height=max(h, 36))
 
     def _make_group_container(self, group, tabs, parent):
-        T = self._T
-
-        container = tk.Frame(parent, bg=T["tab_bar"])
-        container.pack(side="left", padx=(3, 0))
-
-        strip = tk.Frame(container, height=6, bg=group.color, cursor="hand2")
+        T   = self._T
+        con = tk.Frame(parent, bg=group.color, bd=0)
+        group.container = con
+        strip = tk.Frame(con, bg=group.color, cursor="hand2")
         strip.pack(side="top", fill="x")
-
-        header = tk.Frame(container, bg=T["tab_bar"])
-        header.pack(side="top", fill="x")
-
-        sym = "<" if group.collapsed else "v"
-        collapse_btn = tk.Label(
-            header, text=sym, bg=T["tab_bar"],
-            fg=group.color, font=("Segoe UI", 9), cursor="hand2", padx=3)
-        collapse_btn.pack(side="left")
-
-        label_lbl = tk.Label(
-            header, text=group.label, bg=T["tab_bar"],
-            fg=group.color, font=("Segoe UI", 8, "bold"), cursor="hand2", padx=2)
-        label_lbl.pack(side="left")
-
-        inner = tk.Frame(container, bg=T["tab_bar"])
-        if not group.collapsed:
-            inner.pack(side="top")
-
-        group.container    = container
-        group.strip        = strip
-        group.inner        = inner
-        group.collapse_btn = collapse_btn
-        group.label_lbl    = label_lbl
-
-        for w in (strip, header, collapse_btn, label_lbl):
+        group.strip = strip
+        btn = tk.Label(strip, text="▾" if not group.collapsed else "▸",
+                       bg=group.color, fg="#ffffff",
+                       font=("Segoe UI", 9), padx=3, cursor="hand2")
+        btn.pack(side="left")
+        group.collapse_btn = btn
+        lbl = tk.Label(strip, text=group.label,
+                       bg=group.color, fg="#ffffff",
+                       font=("Segoe UI", 9, "bold"), padx=4, cursor="hand2")
+        lbl.pack(side="left")
+        group.label_lbl = lbl
+        for w in (strip, btn, lbl):
+            w.bind("<Button-1>",   lambda e, g=group: self._toggle_collapse(g))
+            w.bind("<Double-Button-1>", lambda e, g=group: self._rename_group(g))
+            w.bind("<Button-3>",   lambda e, g=group: self._group_context(e, g))
             w.bind("<ButtonPress-1>",   lambda e, g=group: self._on_group_press(e, g))
             w.bind("<B1-Motion>",       lambda e, g=group: self._on_group_drag(e, g))
             w.bind("<ButtonRelease-1>", lambda e, g=group: self._on_group_release(e, g))
-            w.bind("<Button-3>",        lambda e, g=group: self._group_context(e, g))
-        label_lbl.bind("<Double-Button-1>",
-                       lambda _e, g=group: self._rename_group(g))
-
-        if group.collapsed:
-            n = len(tabs)
-            count_lbl = tk.Label(
-                container,
-                text="  %d tab%s  " % (n, "s" if n != 1 else ""),
-                bg=T["tab_bar"], fg=group.color,
-                font=("Segoe UI", 9, "italic"), cursor="hand2")
-            count_lbl.pack(side="top", pady=(0, 3))
-            count_lbl.bind("<Button-1>", lambda _e, g=group: self._toggle_collapse(g))
-            count_lbl.bind("<Button-3>", lambda  e, g=group: self._group_context(e, g))
-
-        for tab in tabs:
-            self._make_tab_btn(tab, inner)
+        inner = tk.Frame(con, bg=T["tab_bar"])
+        inner.pack(side="top", fill="x")
+        group.inner = inner
+        return con
 
     def _make_tab_btn(self, tab, parent):
-        T = self._T
+        T        = self._T
+        is_active = (tab is self._active)
+        bg       = T["tab_active"] if is_active else T["tab_idle"]
+        frm      = tk.Frame(parent, bg=bg, cursor="hand2")
+        frm.pack(side="left", padx=(0,1), pady=(2,0))
+        tab.btn_frame = frm
         dot_color = tab.color or T["default_dot"]
-
-        frm = tk.Frame(parent, bg=T["tab_idle"], cursor="hand2")
-        frm.pack(side="left", padx=(1, 0), pady=(3, 0))
-
-        dc = tk.Canvas(frm, width=10, height=10,
-                       bg=T["tab_idle"], highlightthickness=0, bd=0)
-        dc.pack(side="left", padx=(9, 2), pady=14)
-        ov = dc.create_oval(1, 1, 9, 9, fill=dot_color, outline="")
-
-        lbl = tk.Label(frm, text=tab.title, bg=T["tab_idle"],
-                       fg=T["text_fg"], font=("Segoe UI", 10), padx=2)
-        lbl.pack(side="left")
-
-        cls = tk.Label(frm, text="x", bg=T["tab_idle"],
-                       fg=T["close_fg"], font=("Segoe UI", 11, "bold"), padx=7)
-        cls.pack(side="left")
-
-        tab.btn_frame  = frm
-        tab.dot_canvas = dc
-        tab.oval_id    = ov
-        tab.title_lbl  = lbl
-        tab.close_lbl  = cls
-
-        for w in (frm, lbl):
-            w.bind("<ButtonPress-1>",   lambda e, t=tab: self._on_press(e, t))
+        dot = tk.Canvas(frm, width=10, height=10, bg=bg,
+                        highlightthickness=0, cursor="hand2")
+        dot.pack(side="left", padx=(6,2), pady=8)
+        oid = dot.create_oval(1,1,9,9, fill=dot_color, outline="")
+        tab.dot_canvas = dot
+        tab.oval_id   = oid
+        title_lbl = tk.Label(frm, text=tab.title, bg=bg, fg=T["text_fg"],
+                             font=("Segoe UI", 10), padx=2)
+        title_lbl.pack(side="left", pady=4)
+        tab.title_lbl = title_lbl
+        close_lbl = tk.Label(frm, text=" × ", bg=bg, fg=T["close_fg"],
+                             font=("Segoe UI", 11), cursor="hand2")
+        close_lbl.pack(side="left", pady=4)
+        tab.close_lbl = close_lbl
+        for w in (frm, title_lbl, dot):
+            w.bind("<ButtonPress-1>",   lambda e, t=tab, d=(w is dot): self._on_press(e, t, d))
             w.bind("<B1-Motion>",       lambda e, t=tab: self._on_drag(e, t))
             w.bind("<ButtonRelease-1>", lambda e, t=tab: self._on_release(e, t))
-            w.bind("<Button-3>",        lambda e, t=tab: self._tab_context(e, t))
-            w.bind("<Enter>",           lambda e, t=tab: self._tab_hover(t, True))
-            w.bind("<Leave>",           lambda e, t=tab: self._tab_hover(t, False))
-
-        dc.bind("<ButtonPress-1>",   lambda e, t=tab: self._on_press(e, t, dot=True))
-        dc.bind("<B1-Motion>",       lambda e, t=tab: self._on_drag(e, t))
-        dc.bind("<ButtonRelease-1>", lambda e, t=tab: self._on_release(e, t))
-
-        cls.bind("<ButtonPress-1>",   lambda e, t=tab: self.cmd_close_tab(t))
-        cls.bind("<Enter>",  lambda e, w=cls: w.configure(fg="#ff4444"))
-        cls.bind("<Leave>",  lambda e, w=cls, T2=T: w.configure(fg=T2["close_fg"]))
+            w.bind("<Enter>", lambda e, t=tab: self._tab_hover(t, True))
+            w.bind("<Leave>", lambda e, t=tab: self._tab_hover(t, False))
+            w.bind("<Button-3>", lambda e, t=tab: self._tab_context(e, t))
+        close_lbl.bind("<Button-1>",  lambda e, t=tab: self.cmd_close_tab(t))
+        dot.bind("<Button-1>",        lambda e, t=tab: self._show_tab_color_picker(t))
+        frm.bind("<Button-1>",        lambda e, t=tab: self._activate(t))
+        title_lbl.bind("<Button-1>",  lambda e, t=tab: self._activate(t))
+        if is_active:
+            for w in (frm, title_lbl, dot, close_lbl):
+                w.configure(bg=T["tab_active"])
+            dot.configure(bg=T["tab_active"])
 
     def _restore_active_highlight(self):
         T = self._T
         for tab in self._tabs:
-            if not tab.btn_frame:
-                continue
-            bg = T["tab_active"] if tab is self._active else T["tab_idle"]
-            tab.btn_frame.configure(bg=bg)
-            if tab.dot_canvas:
-                tab.dot_canvas.configure(bg=bg)
-            if tab.title_lbl:
-                tab.title_lbl.configure(bg=bg)
-            if tab.close_lbl:
-                tab.close_lbl.configure(bg=bg)
+            if tab.btn_frame:
+                bg = T["tab_active"] if tab is self._active else T["tab_idle"]
+                tab.btn_frame.configure(bg=bg)
+                if tab.title_lbl: tab.title_lbl.configure(bg=bg)
+                if tab.close_lbl: tab.close_lbl.configure(bg=bg)
+                if tab.dot_canvas: tab.dot_canvas.configure(bg=bg)
 
     def _tab_hover(self, tab, entering):
         if tab is self._active:
             return
-        T   = self._T
-        bg  = T["tab_hover"] if entering else T["tab_idle"]
-        if tab.btn_frame:
-            tab.btn_frame.configure(bg=bg)
-        if tab.dot_canvas:
-            tab.dot_canvas.configure(bg=bg)
-        if tab.title_lbl:
-            tab.title_lbl.configure(bg=bg)
-        if tab.close_lbl:
-            tab.close_lbl.configure(bg=bg)
+        T  = self._T
+        bg = T["tab_hover"] if entering else T["tab_idle"]
+        if tab.btn_frame:  tab.btn_frame.configure(bg=bg)
+        if tab.title_lbl:  tab.title_lbl.configure(bg=bg)
+        if tab.close_lbl:  tab.close_lbl.configure(bg=bg)
+        if tab.dot_canvas: tab.dot_canvas.configure(bg=bg)
 
     def _activate(self, tab):
         if self._active and self._active is not tab:
@@ -440,101 +390,82 @@ class Editor(tk.Tk):
             tab.text.focus_set()
         self._restore_active_highlight()
         self._refresh_status()
+        if hasattr(self, "_wrap_on") and tab.text:
+            is_wrapped = tab.text.cget("wrap") != "none"
+            self._wrap_on.set(is_wrapped)
 
-    # ------------------------------------------------------------------
-    # Ghost (floating preview during tab drag)
-    # ------------------------------------------------------------------
+    # ----------------------------------------------------------------
+    # Ghost drag
+    # ----------------------------------------------------------------
     def _create_ghost(self, tab):
-        T = self._T
+        T     = self._T
         ghost = tk.Toplevel(self)
         ghost.overrideredirect(True)
         ghost.attributes("-topmost", True)
-        try:
-            ghost.attributes("-alpha", 0.75)
-        except Exception:
-            pass
-        dot_color = tab.color or T["default_dot"]
-        frm = tk.Frame(ghost, bg=T["tab_active"],
-                       highlightthickness=1, highlightbackground=T["border"])
+        ghost.attributes("-alpha", 0.75)
+        frm = tk.Frame(ghost, bg=T["tab_hover"], padx=10, pady=6)
         frm.pack()
-        dc = tk.Canvas(frm, width=10, height=10, bg=T["tab_active"],
-                       highlightthickness=0, bd=0)
-        dc.pack(side="left", padx=(9, 2), pady=8)
-        dc.create_oval(1, 1, 9, 9, fill=dot_color, outline="")
-        tk.Label(frm, text=tab.title, bg=T["tab_active"],
-                 fg=T["text_fg"], font=("Segoe UI", 10), padx=2).pack(side="left")
-        tk.Label(frm, text="x", bg=T["tab_active"],
-                 fg=T["close_fg"], font=("Segoe UI", 11, "bold"), padx=7).pack(side="left")
-        return ghost
+        tk.Label(frm, text=tab.title, bg=T["tab_hover"],
+                 fg=T["text_fg"], font=("Segoe UI", 10)).pack()
+        self._ghost = ghost
 
     def _move_ghost(self, x, y):
         if self._ghost:
-            self._ghost.geometry("+%d+%d" % (x + 12, y - 10))
+            self._ghost.geometry("+%d+%d" % (x+12, y-10))
 
     def _destroy_ghost(self):
         if self._ghost:
-            try:
-                self._ghost.destroy()
-            except Exception:
-                pass
+            self._ghost.destroy()
             self._ghost = None
 
-    # ------------------------------------------------------------------
-    # Tab drag-and-drop
-    # ------------------------------------------------------------------
+    # ----------------------------------------------------------------
+    # Tab drag
+    # ----------------------------------------------------------------
     def _on_press(self, event, tab, dot=False):
-        self._drag_tab     = tab
+        self._drag_tab     = None
         self._drag_start_x = event.x_root
         self._drag_moved   = False
         self._press_on_dot = dot
         self._activate(tab)
 
     def _on_drag(self, event, tab):
-        if abs(event.x_root - self._drag_start_x) > 6:
-            self._drag_moved = True
-        if not self._drag_moved:
+        if self._press_on_dot:
             return
-        if self._ghost is None:
-            self._ghost = self._create_ghost(tab)
-        self._move_ghost(event.x_root, event.y_root)
-        self._update_drop_indicator(event.x_root)
+        if abs(event.x_root - self._drag_start_x) > 6:
+            if self._drag_tab is None:
+                self._drag_tab = tab
+                self._create_ghost(tab)
+            self._drag_moved = True
+            self._move_ghost(event.x_root, event.y_root)
+            self._update_drop_indicator(event.x_root)
 
     def _on_release(self, event, tab):
         self._destroy_ghost()
-        if not self._drag_moved:
-            if self._press_on_dot:
-                self._show_tab_color_picker(tab)
+        self._clear_drop_indicator()
+        if not self._drag_moved or self._drag_tab is None:
             self._drag_tab   = None
             self._drag_moved = False
-            self._clear_drop_indicator()
             return
-
-        result = self._find_drop_target(event.x_root, tab)
-        self._clear_drop_indicator()
-
-        if result:
-            kind, payload = result
-            if kind == "reorder":
-                self._do_reorder(tab, payload)
-            elif kind == "group":
-                self._do_group(tab, payload)
-            elif kind == "make_group":
-                new_grp = TabGroup()
-                tab.group = new_grp
-                payload.group = new_grp
-                self._rebuild_tab_buttons()
-        else:
-            if tab.group is not None:
-                self._do_ungroup_tab(tab)
-
+        drag = self._drag_tab
         self._drag_tab   = None
         self._drag_moved = False
+        result = self._find_drop_target(event.x_root, drag)
+        if result is None:
+            return
+        kind, payload = result
+        if kind == "reorder":
+            self._do_reorder(drag, payload)
+        elif kind == "make_group":
+            new_grp = TabGroup()
+            drag.group    = new_grp
+            payload.group = new_grp
+            self._rebuild_tab_buttons()
+        elif kind == "group":
+            self._do_group(drag, payload)
+        elif kind == "ungroup":
+            self._do_ungroup_tab(drag)
 
     def _find_drop_target(self, x_root, drag_tab):
-        """
-        Returns ("reorder", idx), ("group", TabGroup),
-                ("make_group", Tab), or None.
-        """
         zones = []
         seen_groups = set()
         for tab in self._tabs:
@@ -546,7 +477,7 @@ class Editor(tk.Tk):
                         bx = tab.btn_frame.winfo_rootx()
                         bw = tab.btn_frame.winfo_width()
                         li = self._tabs.index(tab)
-                        zones.append((bx, bx + bw, "tab", tab, li, li + 1))
+                        zones.append((bx, bx+bw, "tab", tab, li, li+1))
                     except Exception:
                         pass
             else:
@@ -558,111 +489,47 @@ class Editor(tk.Tk):
                         try:
                             bx   = con.winfo_rootx()
                             bw   = con.winfo_width()
-                            idxs = [i for i, t in enumerate(self._tabs)
-                                    if t.group is grp]
-                            zones.append((bx, bx + bw, "group", grp,
-                                          min(idxs), max(idxs) + 1))
+                            idxs = [i for i,t in enumerate(self._tabs) if t.group is grp]
+                            zones.append((bx, bx+bw, "group", grp, min(idxs), max(idxs)+1))
                         except Exception:
                             pass
-
         for bx, bx_end, kind, payload, left_idx, right_idx in zones:
             if bx <= x_root <= bx_end:
                 rel = (x_root - bx) / max(bx_end - bx, 1)
                 if 0.2 <= rel <= 0.8:
                     return ("group" if kind == "group" else "make_group", payload)
                 return ("reorder", left_idx if rel < 0.5 else right_idx)
-
         if zones:
             return ("reorder", len(self._tabs))
         return None
 
     def _update_drop_indicator(self, x_root):
-        self._clear_drop_indicator()
-        canvas = self._bar_canvas
-        T = self._T
-
-        zones = []
-        seen_groups = set()
-        for tab in self._tabs:
-            if tab is self._drag_tab:
-                continue
-            if tab.group is None:
-                if tab.btn_frame:
-                    try:
-                        bx = tab.btn_frame.winfo_rootx()
-                        bw = tab.btn_frame.winfo_width()
-                        zones.append((bx, bx + bw, "tab", tab))
-                    except Exception:
-                        pass
-            else:
-                grp = tab.group
-                if grp not in seen_groups:
-                    seen_groups.add(grp)
-                    con = grp.container
-                    if con:
-                        try:
-                            bx = con.winfo_rootx()
-                            bw = con.winfo_width()
-                            zones.append((bx, bx + bw, "group", grp))
-                        except Exception:
-                            pass
-
-        for bx, bx_end, kind, payload in zones:
-            if bx <= x_root <= bx_end:
-                rel = (x_root - bx) / max(bx_end - bx, 1)
-                if 0.2 <= rel <= 0.8:
-                    try:
-                        rx  = bx - canvas.winfo_rootx()
-                        rw  = bx_end - bx
-                        if kind == "group":
-                            col = payload.color
-                            rh  = payload.container.winfo_height()
-                        else:
-                            col = T["drop_line"]
-                            rh  = 38
-                        self._drop_item = canvas.create_rectangle(
-                            rx, 2, rx + rw, rh + 2,
-                            outline=col, width=3, fill="")
-                    except Exception:
-                        pass
-                else:
-                    cx = bx if rel < 0.5 else bx_end
-                    try:
-                        lx = cx - canvas.winfo_rootx()
-                        self._drop_item = canvas.create_line(
-                            lx, 2, lx, 38, fill=T["drop_line"], width=3)
-                    except Exception:
-                        pass
-                return
-
-        if zones:
-            try:
-                lx = zones[-1][1] - canvas.winfo_rootx()
-                self._drop_item = canvas.create_line(
-                    lx, 2, lx, 38, fill=T["drop_line"], width=3)
-            except Exception:
-                pass
+        c = self._drop_canvas
+        if self._drop_line_id:
+            c.delete(self._drop_line_id)
+            self._drop_line_id = None
+        cx = c.winfo_rootx()
+        lx = x_root - cx
+        h  = c.winfo_height()
+        self._drop_line_id = c.create_line(lx, 0, lx, h,
+            fill=self._T["drop_line"], width=2, dash=(4,2))
 
     def _clear_drop_indicator(self):
-        if self._drop_item is not None:
+        if self._drop_line_id:
             try:
-                self._bar_canvas.delete(self._drop_item)
+                self._drop_canvas.delete(self._drop_line_id)
             except Exception:
                 pass
-            self._drop_item = None
+            self._drop_line_id = None
 
     def _do_reorder(self, tab, new_idx):
+        old = self._tabs.index(tab)
+        self._tabs.pop(old)
+        if new_idx > old:
+            new_idx -= 1
+        self._tabs.insert(new_idx, tab)
         if tab.group is not None:
-            tmp   = [t for t in self._tabs if t is not tab]
-            left  = tmp[new_idx - 1] if 0 < new_idx <= len(tmp) else None
-            right = tmp[new_idx]     if new_idx < len(tmp)       else None
-            same  = ((left  is not None and left.group  is tab.group) or
-                     (right is not None and right.group is tab.group))
-            if not same:
-                tab.group = None
-        self._tabs.remove(tab)
-        idx = min(new_idx, len(self._tabs))
-        self._tabs.insert(idx, tab)
+            self._do_ungroup_tab(tab, rebuild=False)
         self._rebuild_tab_buttons()
 
     def _do_group(self, tab, target_group):
@@ -670,206 +537,104 @@ class Editor(tk.Tk):
         self._rebuild_tab_buttons()
 
     def _do_ungroup_tab(self, tab, rebuild=True):
-        grp = tab.group
-        if grp is None:
-            return
+        old_grp = tab.group
         tab.group = None
-        remaining = [t for t in self._tabs if t.group is grp]
-        if len(remaining) == 1:
-            remaining[0].group = None
+        if old_grp:
+            remaining = [t for t in self._tabs if t.group is old_grp]
+            if len(remaining) == 1:
+                remaining[0].group = None
         if rebuild:
             self._rebuild_tab_buttons()
 
-    # ------------------------------------------------------------------
-    # Group drag-and-drop
-    # ------------------------------------------------------------------
+    # ----------------------------------------------------------------
+    # Group drag
+    # ----------------------------------------------------------------
     def _on_group_press(self, event, group):
-        self._drag_group       = group
+        self._drag_group       = None
         self._drag_grp_start_x = event.x_root
         self._drag_grp_moved   = False
 
     def _on_group_drag(self, event, group):
         if abs(event.x_root - self._drag_grp_start_x) > 8:
+            self._drag_group   = group
             self._drag_grp_moved = True
-        if not self._drag_grp_moved:
-            return
-        if self._ghost is None:
-            self._ghost = self._create_group_ghost(group)
-        self._ghost.geometry("+%d+%d" % (event.x_root + 12, event.y_root - 10))
-        self._update_group_drop_indicator(event.x_root)
+            self._update_group_drop_indicator(event.x_root)
 
     def _on_group_release(self, event, group):
-        self._destroy_ghost()
-        if not self._drag_grp_moved:
-            self._toggle_collapse(group)
-            self._clear_drop_indicator()
-            self._drag_group = None
-            return
-
-        result = self._find_group_drop_target(event.x_root)
         self._clear_drop_indicator()
-
-        if result:
-            action, payload = result
-            if action == "reorder":
-                self._do_group_reorder(group, payload)
-            elif action == "merge":
-                self._do_merge_groups(group, payload)
-
-        self._drag_group     = None
+        if not self._drag_grp_moved or self._drag_group is None:
+            self._drag_group   = None
+            self._drag_grp_moved = False
+            return
+        drag = self._drag_group
+        self._drag_group   = None
         self._drag_grp_moved = False
-
-    def _create_group_ghost(self, group):
-        T = self._T
-        ghost = tk.Toplevel(self)
-        ghost.overrideredirect(True)
-        ghost.attributes("-topmost", True)
-        try:
-            ghost.attributes("-alpha", 0.80)
-        except Exception:
-            pass
-        outer = tk.Frame(ghost, bg=group.color, pady=3)
-        outer.pack()
-        tk.Label(outer, text="  %s  " % group.label,
-                 bg=group.color, fg="#ffffff",
-                 font=("Segoe UI", 9, "bold")).pack()
-        return ghost
+        result = self._find_group_drop_target(event.x_root)
+        if result is None:
+            return
+        kind, payload = result
+        if kind == "reorder":
+            self._do_group_reorder(drag, payload)
+        elif kind == "merge":
+            self._do_merge_groups(drag, payload)
 
     def _find_group_drop_target(self, x_root):
-        drag   = self._drag_group
-        canvas = self._bar_canvas
-
-        items = []
-        seen  = set()
+        seen = set()
+        zones = []
         for tab in self._tabs:
-            if tab.group is None:
-                btn = tab.btn_frame
-                if not btn:
-                    continue
-                try:
-                    bx = btn.winfo_rootx()
-                    bw = btn.winfo_width()
-                    items.append((bx, bx + bw, "tab", tab))
-                except Exception:
-                    pass
-            else:
-                grp = tab.group
-                if grp in seen or grp is drag:
-                    continue
-                seen.add(grp)
-                con = grp.container
-                if not con:
-                    continue
-                try:
-                    bx = con.winfo_rootx()
-                    bw = con.winfo_width()
-                    items.append((bx, bx + bw, "group", grp))
-                except Exception:
-                    pass
-
-        for bx, bx_end, kind, payload in items:
-            if bx <= x_root <= bx_end:
-                rel = (x_root - bx) / max(bx_end - bx, 1)
-                if kind == "group" and 0.2 <= rel <= 0.8:
-                    return ("merge", payload)
-                if rel < 0.5:
-                    return ("reorder", bx)
-                else:
-                    return ("reorder", bx_end)
-
-        if items:
-            return ("reorder", items[-1][1] + 1)
-        return None
-
-    def _update_group_drop_indicator(self, x_root):
-        self._clear_drop_indicator()
-        result = self._find_group_drop_target(x_root)
-        if not result:
-            return
-        action, payload = result
-        canvas = self._bar_canvas
-        T = self._T
-
-        if action == "reorder":
-            try:
-                lx = payload - canvas.winfo_rootx()
-                self._drop_item = canvas.create_line(
-                    lx, 2, lx, 38, fill=T["drop_line"], width=3)
-            except Exception:
-                pass
-        elif action == "merge":
-            grp = payload
+            grp = tab.group
+            if grp is None or grp in seen or grp is self._drag_group:
+                continue
+            seen.add(grp)
             con = grp.container
             if con:
                 try:
-                    bx = con.winfo_rootx() - canvas.winfo_rootx()
+                    bx = con.winfo_rootx()
                     bw = con.winfo_width()
-                    bh = con.winfo_height()
-                    self._drop_item = canvas.create_rectangle(
-                        bx, 2, bx + bw, bh + 2,
-                        outline=grp.color, width=3, fill="")
+                    zones.append((bx, bx+bw, grp))
                 except Exception:
                     pass
+        for bx, bx_end, grp in zones:
+            if bx <= x_root <= bx_end:
+                rel = (x_root - bx) / max(bx_end - bx, 1)
+                if 0.2 <= rel <= 0.8:
+                    return ("merge", grp)
+                return ("reorder", x_root)
+        return ("reorder", x_root)
 
-    def _do_group_reorder(self, group, screen_x_boundary):
-        best_idx  = len(self._tabs)
-        best_dist = float("inf")
-        for i, tab in enumerate(self._tabs):
-            if tab.group is group:
-                continue
-            btn = tab.btn_frame
-            if not btn:
-                continue
-            try:
-                bx = btn.winfo_rootx()
-                for px, ii in ((bx, i), (bx + btn.winfo_width(), i + 1)):
-                    d = abs(px - screen_x_boundary)
-                    if d < best_dist:
-                        best_dist = d
-                        best_idx  = ii
-            except Exception:
-                pass
+    def _update_group_drop_indicator(self, x_root):
+        self._update_drop_indicator(x_root)
 
-        seen = set()
-        for tab in self._tabs:
-            if tab.group is None or tab.group is group or tab.group in seen:
-                continue
-            seen.add(tab.group)
-            con = tab.group.container
-            if not con:
-                continue
-            try:
-                bx  = con.winfo_rootx()
-                bw  = con.winfo_width()
-                fi  = next(i for i, t in enumerate(self._tabs) if t.group is tab.group)
-                li  = max(i for i, t in enumerate(self._tabs) if t.group is tab.group)
-                for px, ii in ((bx, fi), (bx + bw, li + 1)):
-                    d = abs(px - screen_x_boundary)
-                    if d < best_dist:
-                        best_dist = d
-                        best_idx  = ii
-            except Exception:
-                pass
-
-        grp_tabs = [t for t in self._tabs if t.group is group]
-        for t in grp_tabs:
-            self._tabs.remove(t)
-        ins = min(best_idx, len(self._tabs))
-        for j, t in enumerate(grp_tabs):
-            self._tabs.insert(ins + j, t)
+    def _do_group_reorder(self, group, screen_x):
+        tabs_in  = [t for t in self._tabs if t.group is group]
+        tabs_out = [t for t in self._tabs if t.group is not group]
+        insert_at = len(tabs_out)
+        for i, t in enumerate(tabs_out):
+            if t.btn_frame:
+                try:
+                    if t.btn_frame.winfo_rootx() > screen_x:
+                        insert_at = i
+                        break
+                except Exception:
+                    pass
+        new_order = tabs_out[:insert_at] + tabs_in + tabs_out[insert_at:]
+        self._tabs = new_order
         self._rebuild_tab_buttons()
 
-    def _do_merge_groups(self, src_group, tgt_group):
+    def _do_merge_groups(self, src, tgt):
         for tab in self._tabs:
-            if tab.group is src_group:
-                tab.group = tgt_group
+            if tab.group is src:
+                tab.group = tgt
         self._rebuild_tab_buttons()
 
-    # ------------------------------------------------------------------
+    # ----------------------------------------------------------------
     # Group actions
-    # ------------------------------------------------------------------
+    # ----------------------------------------------------------------
     def _toggle_collapse(self, group):
         group.collapsed = not group.collapsed
+        if group.collapse_btn:
+            group.collapse_btn.configure(
+                text="▸" if group.collapsed else "▾")
         self._rebuild_tab_buttons()
 
     def _group_context(self, event, group):
@@ -878,28 +643,27 @@ class Editor(tk.Tk):
                   activebackground=T["menu_sel"], activeforeground=T["menu_fg"])
         m = tk.Menu(self, **kw)
         lbl = "Expand" if group.collapsed else "Collapse"
-        m.add_command(label=lbl,           command=lambda: self._toggle_collapse(group))
-        m.add_command(label="Rename...",   command=lambda: self._rename_group(group))
-        m.add_command(label="Change Color...", command=lambda: self._pick_group_color(group))
+        m.add_command(label=lbl,             command=lambda: self._toggle_collapse(group))
+        m.add_command(label="Rename...",     command=lambda: self._rename_group(group))
+        m.add_command(label="Change Color...",command=lambda: self._pick_group_color(group))
         m.add_separator()
-        m.add_command(label="Ungroup All", command=lambda: self._ungroup(group))
+        m.add_command(label="Ungroup All",   command=lambda: self._ungroup(group))
         try:
             m.tk_popup(event.x_root, event.y_root)
         finally:
             m.grab_release()
 
     def _rename_group(self, group):
-        name = simpledialog.askstring(
-            "Rename Group", "Enter group name:",
+        name = simpledialog.askstring("Rename Group", "Enter group name:",
             initialvalue=group.label, parent=self)
         if name and name.strip():
             group.label = name.strip()
             if group.label_lbl:
-                group.label_lbl.config(text=group.label)
+                group.label_lbl.configure(text=group.label)
 
     def _pick_group_color(self, group):
-        result = colorchooser.askcolor(color=group.color, parent=self,
-                                       title="Group Color")
+        result = colorchooser.askcolor(color=group.color,
+            parent=self, title="Group Color")
         if result and result[1]:
             group.color = result[1]
             self._rebuild_tab_buttons()
@@ -910,40 +674,80 @@ class Editor(tk.Tk):
                 tab.group = None
         self._rebuild_tab_buttons()
 
-    # ------------------------------------------------------------------
+    # ----------------------------------------------------------------
     # Tab context menu
-    # ------------------------------------------------------------------
+    # ----------------------------------------------------------------
     def _tab_context(self, event, tab):
         T  = self._T
         kw = dict(tearoff=0, bg=T["menu_bg"], fg=T["menu_fg"],
                   activebackground=T["menu_sel"], activeforeground=T["menu_fg"])
         m = tk.Menu(self, **kw)
-        m.add_command(label="Rename...",           command=lambda: self._rename_tab(tab))
-        m.add_command(label="Tab Color...",        command=lambda: self._show_tab_color_picker(tab))
-        m.add_command(label="Text Background...",  command=lambda: self._pick_text_bg(tab))
-        m.add_command(label="Text Color...",       command=lambda: self._pick_text_fg(tab))
-        m.add_command(label="Reset Text Colors",   command=lambda: self._reset_text_colors(tab))
+        m.add_command(label="Rename...",          command=lambda: self._rename_tab(tab))
+        m.add_command(label="Tab Color...",       command=lambda: self._show_tab_color_picker(tab))
+        m.add_command(label="Text Background...", command=lambda: self._pick_text_bg(tab))
+        m.add_command(label="Reset Text Colors",  command=lambda: self._reset_text_colors(tab))
         m.add_separator()
-        m.add_command(label="Close",               command=lambda: self.cmd_close_tab(tab))
+        m.add_command(label="Close",              command=lambda: self.cmd_close_tab(tab))
         try:
             m.tk_popup(event.x_root, event.y_root)
         finally:
             m.grab_release()
 
+    def _rename_tab(self, tab):
+        name = simpledialog.askstring("Rename Tab", "Enter tab name:",
+            initialvalue=tab.title.rstrip(" *"), parent=self)
+        if name and name.strip():
+            tab.title = name.strip()
+            if tab.title_lbl:
+                tab.title_lbl.configure(text=tab.title)
+
+    def _show_tab_color_picker(self, tab):
+        T   = self._T
+        win = tk.Toplevel(self)
+        win.title("Tab Color")
+        win.configure(bg=T["tab_bar"])
+        win.resizable(False, False)
+        win.transient(self)
+        win.grab_set()
+        tk.Label(win, text="Choose a color:", bg=T["tab_bar"],
+                 fg=T["text_fg"], font=("Segoe UI", 10), pady=8).pack()
+        row = tk.Frame(win, bg=T["tab_bar"])
+        row.pack(padx=12, pady=(0,8))
+        def pick(c):
+            tab.color = c
+            if tab.dot_canvas and tab.oval_id:
+                tab.dot_canvas.itemconfig(tab.oval_id, fill=c)
+            win.destroy()
+        for c in _ACCENT_CYCLE:
+            b = tk.Canvas(row, width=24, height=24, bg=T["tab_bar"],
+                          highlightthickness=0, cursor="hand2")
+            b.pack(side="left", padx=3)
+            b.create_oval(3,3,21,21, fill=c, outline="")
+            b.bind("<Button-1>", lambda e, col=c: pick(col))
+        def custom():
+            r = colorchooser.askcolor(color=tab.color or T["default_dot"],
+                parent=win, title="Custom Color")
+            if r and r[1]:
+                pick(r[1])
+        tk.Button(win, text="Custom...", command=custom,
+                  bg=T["tab_idle"], fg=T["text_fg"],
+                  relief="flat", pady=4).pack(pady=(0,10))
+
+    # ----------------------------------------------------------------
+    # Per-tab text colors
+    # ----------------------------------------------------------------
     def _pick_text_bg(self, tab):
-        result = colorchooser.askcolor(
-            color=tab.text_bg or self._T["text_bg"],
+        r = colorchooser.askcolor(color=tab.text_bg or self._T["text_bg"],
             parent=self, title="Text Background Color")
-        if result and result[1]:
-            tab.text_bg = result[1]
+        if r and r[1]:
+            tab.text_bg = r[1]
             self._apply_text_colors(tab)
 
     def _pick_text_fg(self, tab):
-        result = colorchooser.askcolor(
-            color=tab.text_fg or self._T["text_fg"],
+        r = colorchooser.askcolor(color=tab.text_fg or self._T["text_fg"],
             parent=self, title="Text Color")
-        if result and result[1]:
-            tab.text_fg = result[1]
+        if r and r[1]:
+            tab.text_fg = r[1]
             self._apply_text_colors(tab)
 
     def _reset_text_colors(self, tab):
@@ -957,57 +761,9 @@ class Editor(tk.Tk):
             fg = tab.text_fg or self._T["text_fg"]
             tab.text.configure(bg=bg, fg=fg, insertbackground=fg)
 
-    def _rename_tab(self, tab):
-        name = simpledialog.askstring(
-            "Rename Tab", "Enter tab name:",
-            initialvalue=tab.title.rstrip(" *"), parent=self)
-        if name and name.strip():
-            tab.title = name.strip()
-            if tab.title_lbl:
-                tab.title_lbl.config(text=tab.title)
-
-    def _show_tab_color_picker(self, tab):
-        T      = self._T
-        colors = _ACCENT_CYCLE
-        win    = tk.Toplevel(self)
-        win.title("Tab Color")
-        win.configure(bg=T["tab_bar"])
-        win.resizable(False, False)
-        win.transient(self)
-        win.grab_set()
-
-        tk.Label(win, text="Choose a color:", bg=T["tab_bar"],
-                 fg=T["text_fg"], font=("Segoe UI", 10), pady=8).pack()
-
-        row = tk.Frame(win, bg=T["tab_bar"])
-        row.pack(padx=12, pady=(0, 8))
-
-        def pick(c):
-            tab.color = c
-            if tab.dot_canvas and tab.oval_id:
-                tab.dot_canvas.itemconfig(tab.oval_id, fill=c)
-            win.destroy()
-
-        for c in colors:
-            b = tk.Canvas(row, width=24, height=24, bg=T["tab_bar"],
-                          highlightthickness=0, cursor="hand2")
-            b.pack(side="left", padx=3)
-            b.create_oval(3, 3, 21, 21, fill=c, outline="")
-            b.bind("<Button-1>", lambda e, col=c: pick(col))
-
-        def custom():
-            r = colorchooser.askcolor(color=tab.color or T["default_dot"],
-                                      parent=win, title="Custom Color")
-            if r and r[1]:
-                pick(r[1])
-
-        tk.Button(win, text="Custom...", command=custom,
-                  bg=T["tab_idle"], fg=T["text_fg"],
-                  relief="flat", pady=4).pack(pady=(0, 10))
-
-    # ------------------------------------------------------------------
-    # About dialog
-    # ------------------------------------------------------------------
+    # ----------------------------------------------------------------
+    # About
+    # ----------------------------------------------------------------
     def _show_about(self):
         T   = self._T
         win = tk.Toplevel(self)
@@ -1016,644 +772,670 @@ class Editor(tk.Tk):
         win.resizable(False, False)
         win.transient(self)
         win.grab_set()
+        tk.Label(win, text="Jotter", bg=T["bg"], fg=T["text_fg"],
+                 font=("Segoe UI", 20, "bold"), pady=12).pack()
+        tk.Label(win, text="Version 2.0", bg=T["bg"], fg=T["text_fg"],
+                 font=("Segoe UI", 11)).pack()
+        tk.Label(win, text="A lightweight rich-text editor", bg=T["bg"],
+                 fg=T["close_fg"], font=("Segoe UI", 10), pady=4).pack()
 
-        # Header
-        hdr = tk.Frame(win, bg="#007acc", pady=18)
-        hdr.pack(fill="x")
-        tk.Label(hdr, text="Jotter", bg="#007acc", fg="#ffffff",
-                 font=("Segoe UI", 22, "bold")).pack()
-        tk.Label(hdr, text="Version 2.0", bg="#007acc", fg="#cce4f7",
-                 font=("Segoe UI", 10)).pack()
-
-        # Body
-        body = tk.Frame(win, bg=T["bg"], padx=28, pady=18)
-        body.pack(fill="both")
-
-        # Description
-        tk.Label(body,
-                 text="Jotter is a lightweight text editor built for speed and organisation."
-                      " Open as many tabs as you like, drag them to reorder, group related"
-                      " tabs together, and format rich text with fonts, colours, and styles."
-                      " Supports plain text and RTF files.",
-                 bg=T["bg"], fg=T["text_fg"], font=("Segoe UI", 10),
-                 wraplength=460, justify="left").pack(anchor="w", pady=(0, 12))
-
-        # Controls reference
-        tk.Label(body, text="Controls", bg=T["bg"], fg=T["text_fg"],
-                 font=("Segoe UI", 10, "bold")).pack(anchor="w")
-
-        controls = (
-            ("Drag a tab",              "Reorder it in the bar"),
-            ("Drag onto another tab",   "Group the two tabs together"),
-            ("Drag out of a group",     "Ungroup that tab"),
-            ("Drag one group onto another", "Merge the groups"),
-            ("Click group strip/label", "Collapse / expand the group"),
-            ("Double-click group label","Rename the group"),
-            ("Right-click a tab",       "Rename, recolour, text bg/fg, or close"),
-            ("Right-click group strip", "Recolour, rename, or ungroup"),
-            ("Right-click text area",   "Cut/Copy/Paste, Bold/Italic/Underline, Find"),
-            ("Click the colour dot",    "Pick a tab accent colour"),
-            ("Ctrl+N / Ctrl+W",         "New tab / close tab"),
-            ("Ctrl+O / Ctrl+S",         "Open file / save file (.txt or .rtf)"),
-            ("Ctrl+F / Ctrl+H",         "Find / Find & Replace"),
-            ("Ctrl+B / Ctrl+I / Ctrl+U","Bold / Italic / Underline"),
-        )
-        grid = tk.Frame(body, bg=T["bg"])
-        grid.pack(anchor="w", pady=(4, 12))
-        for row, (action, result) in enumerate(controls):
-            tk.Label(grid, text=action, bg=T["bg"], fg="#007acc",
-                     font=("Segoe UI", 9, "bold"), anchor="w", width=30
-                     ).grid(row=row, column=0, sticky="w")
-            tk.Label(grid, text=result, bg=T["bg"], fg=T["text_fg"],
-                     font=("Segoe UI", 9), anchor="w"
-                     ).grid(row=row, column=1, sticky="w", padx=(8, 0))
-
-        tk.Frame(body, bg=T["border"], height=1).pack(fill="x", pady=(0, 14))
-
-        # Author
-        tk.Label(body, text="Chris Lutz", bg=T["bg"], fg=T["text_fg"],
-                 font=("Segoe UI", 11, "bold")).pack(anchor="w")
-        tk.Label(body, text="chrismlutz@gmail.com", bg=T["bg"], fg="#007acc",
-                 font=("Segoe UI", 10), cursor="hand2").pack(anchor="w")
-        gh = tk.Label(body, text="github.com/chrismlutz-gif/Jotter",
-                      bg=T["bg"], fg="#007acc", font=("Segoe UI", 10),
-                      cursor="hand2")
-        gh.pack(anchor="w")
-        gh.bind("<Button-1>", lambda _e: __import__("webbrowser").open(
-            "https://github.com/chrismlutz-gif/Jotter"))
-
-        tk.Frame(body, bg=T["border"], height=1).pack(fill="x", pady=14)
-
-        license_text = (
-            "MIT License\n\n"
-            "Copyright (c) 2026 Chris Lutz\n\n"
-            "Permission is hereby granted, free of charge, to any person obtaining\n"
-            "a copy of this software and associated documentation files (the\n"
-            "\"Software\"), to deal in the Software without restriction, including\n"
-            "without limitation the rights to use, copy, modify, merge, publish,\n"
-            "distribute, sublicense, and/or sell copies of the Software, and to\n"
-            "permit persons to whom the Software is furnished to do so, subject to\n"
-            "the following conditions:\n\n"
-            "The above copyright notice and this permission notice shall be included\n"
-            "in all copies or substantial portions of the Software.\n\n"
-            "THE SOFTWARE IS PROVIDED \"AS IS\", WITHOUT WARRANTY OF ANY KIND,\n"
-            "EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF\n"
-            "MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.\n"
-            "IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY\n"
-            "CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT,\n"
-            "TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE\n"
-            "SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE."
-        )
-        txt = tk.Text(body, bg=T["tab_bar"], fg=T["text_fg"], relief="flat",
-                      font=("Segoe UI", 9), width=58, height=16,
-                      wrap="word", bd=6, state="normal", cursor="arrow")
-        txt.insert("1.0", license_text)
-        txt.configure(state="disabled")
-        txt.pack(fill="x")
-
+        frame = tk.Frame(win, bg=T["bg"], padx=20, pady=8)
+        frame.pack(fill="x")
+        features = [
+            ("Ctrl+N",          "New tab"),
+            ("Ctrl+O",          "Open .txt or .rtf file"),
+            ("Ctrl+S",          "Save"),
+            ("Ctrl+Shift+S",    "Save As"),
+            ("Ctrl+W",          "Close tab"),
+            ("Ctrl+F",          "Find"),
+            ("Ctrl+H",          "Find & Replace"),
+            ("Ctrl+B",          "Bold"),
+            ("Ctrl+I",          "Italic"),
+            ("Ctrl+U",          "Underline"),
+            ("Drag tab",        "Reorder or group tabs"),
+            ("Right-click tab", "Rename, color, text background, close"),
+            ("Right-click text","Cut / Copy / Paste / Format / Case"),
+            ("Toolbar",         "Font family & size, Aa▾ case, B / I / U / S̶"),
+            ("Toolbar",         "Text & highlight color, alignment, ↵ Wrap"),
+            ("Hover controls",  "Tooltips on all toolbar controls"),
+            ("Aa▾",             "Change case: UPPER / lower / Capitalize / tOGGLE"),
+            ("S̶  button",       "Strikethrough formatting"),
+            ("↵ Wrap",          "Toggle word wrap per tab"),
+            ("✕ fmt",           "Clear all formatting from selection"),
+        ]
+        for key, desc in features:
+            row = tk.Frame(frame, bg=T["bg"])
+            row.pack(fill="x", pady=1)
+            tk.Label(row, text=key, bg=T["bg"], fg=T["default_dot"],
+                     font=("Consolas", 9), width=16, anchor="e").pack(side="left")
+            tk.Label(row, text="  " + desc, bg=T["bg"], fg=T["text_fg"],
+                     font=("Segoe UI", 9), anchor="w").pack(side="left")
         tk.Button(win, text="Close", command=win.destroy,
-                  bg="#007acc", fg="#ffffff", relief="flat",
-                  font=("Segoe UI", 10), padx=24, pady=6,
-                  activebackground="#005f9e", activeforeground="#ffffff",
-                  cursor="hand2").pack(pady=14)
+                  bg=T["tab_idle"], fg=T["text_fg"], relief="flat",
+                  padx=20, pady=4).pack(pady=(4,14))
 
-    # ------------------------------------------------------------------
+    # ----------------------------------------------------------------
     # File commands
-    # ------------------------------------------------------------------
+    # ----------------------------------------------------------------
     def _refresh_tab_label(self, tab):
-        title = tab.title.rstrip(" *")
+        title = tab.title
         if tab.modified:
             title += " *"
-        tab.title = title
         if tab.title_lbl:
-            tab.title_lbl.config(text=title)
+            tab.title_lbl.configure(text=title)
+        base = tab.title.rstrip(" *") if tab.title else "Jotter"
+        self.title(base + (" *" if tab.modified else "") + " — Jotter")
 
     def cmd_open(self, event=None):
         path = filedialog.askopenfilename(
             parent=self,
-            title="Open file",
-            filetypes=[("RTF files", "*.rtf"),
+            filetypes=[("Text & RTF files", "*.txt *.rtf"),
                        ("Text files", "*.txt"),
-                       ("All files", "*.*")])
+                       ("RTF files",  "*.rtf"),
+                       ("All files",  "*.*")])
         if not path:
             return
-        is_rtf = path.lower().endswith(".rtf")
-        try:
-            mode = "rb" if is_rtf else "r"
-            enc  = None if is_rtf else "utf-8"
-            with open(path, mode, **({"encoding": enc, "errors": "replace"} if not is_rtf else {})) as f:
-                content = f.read()
-            if is_rtf:
-                content = content.decode("latin-1", errors="replace")
-        except Exception as e:
-            messagebox.showerror("Open failed", str(e), parent=self)
-            return
-        tab = self.cmd_new_tab(title=os.path.basename(path))
+        tab = self._active
+        if tab is None or tab.modified or tab.filepath is not None:
+            tab = Tab(os.path.basename(path))
+            self._tabs.append(tab)
+            self._make_text_area(tab)
+        else:
+            tab.title = os.path.basename(path)
         tab.filepath = path
         tab.modified = False
-        if tab.text:
-            tab.text.delete("1.0", "end")
-            if is_rtf:
-                rtf_io.parse_rtf(tab.text, content)
-            else:
-                tab.text.insert("1.0", content)
-            tab.text.edit_reset()
+        self._rebuild_tab_buttons()
+        self._activate(tab)
+        tw = tab.text
+        tw.configure(state="normal")
+        tw.delete("1.0", "end")
+        if path.lower().endswith(".rtf"):
+            try:
+                with open(path, "rb") as f:
+                    raw = f.read().decode("latin-1", errors="replace")
+                rtf_io.parse_rtf(tw, raw)
+            except Exception as e:
+                messagebox.showerror("Open Error", str(e), parent=self)
+        else:
+            try:
+                with open(path, encoding="utf-8", errors="replace") as f:
+                    tw.insert("1.0", f.read())
+            except Exception as e:
+                messagebox.showerror("Open Error", str(e), parent=self)
+        tw.edit_reset()
         self._refresh_tab_label(tab)
 
-    def cmd_save(self, tab=None, event=None):
-        if tab is None:
-            tab = self._active
-        if tab is None:
+    def cmd_save(self, event=None):
+        if self._active is None:
             return
-        if tab.filepath is None:
-            self.cmd_save_as(tab)
+        if self._active.filepath is None:
+            self.cmd_save_as()
             return
-        is_rtf = tab.filepath.lower().endswith(".rtf")
+        self._write_file(self._active, self._active.filepath)
+
+    def cmd_save_as(self, event=None):
+        if self._active is None:
+            return
+        is_rtf = (self._active.filepath or "").lower().endswith(".rtf")
+        default_ext = ".rtf" if is_rtf else ".txt"
+        path = filedialog.asksaveasfilename(
+            parent=self,
+            defaultextension=default_ext,
+            filetypes=[("RTF files", "*.rtf"),
+                       ("Text files", "*.txt"),
+                       ("All files",  "*.*")],
+            initialfile=self._active.title.rstrip(" *") or "Untitled")
+        if not path:
+            return
+        self._active.filepath = path
+        self._active.title    = os.path.basename(path)
+        self._write_file(self._active, path)
+
+    def _write_file(self, tab, path):
+        tw = tab.text
         try:
-            if is_rtf:
-                data = rtf_io.generate_rtf(tab.text).encode("latin-1", errors="replace")
-                with open(tab.filepath, "wb") as f:
-                    f.write(data)
+            if path.lower().endswith(".rtf"):
+                rtf_bytes = rtf_io.generate_rtf(tw)
+                with open(path, "wb") as f:
+                    f.write(rtf_bytes.encode("latin-1", errors="replace"))
             else:
-                with open(tab.filepath, "w", encoding="utf-8") as f:
-                    f.write(tab.text.get("1.0", "end-1c"))
+                content = tw.get("1.0", "end-1c")
+                with open(path, "w", encoding="utf-8") as f:
+                    f.write(content)
             tab.modified = False
             self._refresh_tab_label(tab)
         except Exception as e:
-            messagebox.showerror("Save failed", str(e), parent=self)
+            messagebox.showerror("Save Error", str(e), parent=self)
 
-    def cmd_save_as(self, tab=None, event=None):
-        if tab is None:
-            tab = self._active
-        if tab is None:
-            return
-        path = filedialog.asksaveasfilename(
-            parent=self,
-            title="Save As",
-            defaultextension=".txt",
-            filetypes=[("RTF files", "*.rtf"),
-                       ("Text files", "*.txt"),
-                       ("All files", "*.*")])
-        if not path:
-            return
-        tab.filepath = path
-        tab.title    = os.path.basename(path)
-        self.cmd_save(tab)
-
-    def cmd_toggle_theme(self):
-        self._dark = not self._dark
-        self._T    = DARK if self._dark else LIGHT
-        # rebuild the whole UI by destroying children and re-running builds
-        for w in self.winfo_children():
-            w.destroy()
+    def cmd_toggle_theme(self, event=None):
+        self._theme_name = "light" if self._theme_name == "dark" else "dark"
+        self._T = THEMES[self._theme_name]
         self.configure(bg=self._T["bg"])
-        self._find_frame  = None
-        self._active      = None
-        tabs_backup = [(t.title.rstrip(" *"), t.path, t.color,
-                        t.text.get("1.0", "end-1c") if t.text else "",
-                        t.group) for t in self._tabs]
-        self._tabs = []
-        self._build_menu()
-        self._build_tab_bar()
-        self._build_body()
-        self._build_statusbar()
-        self._build_findbar()
-        for title, path, color, content, grp in tabs_backup:
-            tab = self.cmd_new_tab(title=title)
-            tab.path  = path
-            tab.color = color
-            if tab.text:
-                tab.text.insert("1.0", content)
-                tab.text.edit_reset()
-                tab.modified = False
-            if grp is not None:
-                tab.group = grp
         self._rebuild_tab_buttons()
-        if self._tabs:
-            self._activate(self._tabs[0])
+        for tab in self._tabs:
+            self._apply_text_colors(tab)
+            if tab.linenos:
+                T = self._T
+                tab.linenos.configure(bg=T["ln_bg"], fg=T["ln_fg"])
+        if hasattr(self, "_status_left"):
+            T = self._T
+            self._status_left.master.configure(bg=T["status_bg"])
+            self._status_left.configure(bg=T["status_bg"], fg=T["status_fg"])
+            self._status_right.configure(bg=T["status_bg"], fg=T["status_fg"])
 
-    # ------------------------------------------------------------------
+    # ----------------------------------------------------------------
     # Formatting toolbar
-    # ------------------------------------------------------------------
+    # ----------------------------------------------------------------
     def _build_fmt_toolbar(self):
         T   = self._T
-        bar = tk.Frame(self, bg=T["tab_bar"], pady=3)
+        bar = tk.Frame(self, bg=T["tab_bar"], pady=2)
         bar.pack(side="top", fill="x")
         self._fmt_bar = bar
 
-        btn_kw = dict(bg=T["tab_idle"], fg=T["text_fg"], relief="flat",
-                      activebackground=T["tab_hover"], activeforeground=T["text_fg"],
-                      padx=7, pady=2, cursor="hand2", bd=0)
+        families = sorted(tkfont.families())
+        self._font_var = tk.StringVar(value="Consolas")
+        fc = ttk.Combobox(bar, textvariable=self._font_var, values=families,
+                          width=18, state="readonly")
+        fc.pack(side="left", padx=(4,2))
+        fc.bind("<<ComboboxSelected>>",
+                lambda e: self._fmt_set_font(self._font_var.get(),
+                                             int(self._size_var.get())))
+        ToolTip(fc, "Font family\nApplied to selected text")
 
-        # Font family
-        families = sorted(set(tkfont.families()))
-        self._fmt_font_var = tk.StringVar(value="Consolas")
-        ff = ttk.Combobox(bar, textvariable=self._fmt_font_var,
-                          values=families, width=18, state="readonly")
-        ff.pack(side="left", padx=(6,2), pady=1)
-        ff.bind("<<ComboboxSelected>>",
-                lambda _e: self._fmt_set_font(family=self._fmt_font_var.get()))
+        sizes = [str(s) for s in [8,9,10,11,12,14,16,18,20,24,28,32,36,48,72]]
+        self._size_var = tk.StringVar(value="11")
+        sc = ttk.Combobox(bar, textvariable=self._size_var, values=sizes,
+                          width=4, state="readonly")
+        sc.pack(side="left", padx=(0,4))
+        sc.bind("<<ComboboxSelected>>",
+                lambda e: self._fmt_set_font(self._font_var.get(),
+                                             int(self._size_var.get())))
+        ToolTip(sc, "Font size (pt)\nApplied to selected text")
 
-        # Font size
-        self._fmt_size_var = tk.StringVar(value="11")
-        fs = ttk.Combobox(bar, textvariable=self._fmt_size_var,
-                          values=[str(s) for s in (6,7,8,9,10,11,12,14,16,18,20,24,28,32,36,48,72)],
-                          width=4)
-        fs.pack(side="left", padx=2, pady=1)
-        fs.bind("<<ComboboxSelected>>",
-                lambda _e: self._fmt_set_font(size=int(self._fmt_size_var.get())))
-        fs.bind("<Return>",
-                lambda _e: self._fmt_set_font(size=int(self._fmt_size_var.get() or 11)))
+        btn_kw = dict(bg=T["tab_idle"], fg=T["text_fg"],
+                      relief="flat", padx=6, pady=2,
+                      cursor="hand2")
 
-        # Separator
-        tk.Frame(bar, bg=T["border"], width=1).pack(side="left", fill="y", padx=4, pady=3)
+        def _show_case_menu(event=None):
+            T2 = self._T
+            kw2 = dict(tearoff=0, bg=T2["menu_bg"], fg=T2["menu_fg"],
+                       activebackground=T2["menu_sel"],
+                       activeforeground=T2["menu_fg"])
+            m = tk.Menu(self, **kw2)
+            m.add_command(label="UPPER CASE",           command=lambda: self._change_case("upper"))
+            m.add_command(label="lower case",            command=lambda: self._change_case("lower"))
+            m.add_command(label="Capitalize Each Word",  command=lambda: self._change_case("title"))
+            m.add_command(label="tOGGLE cASE",           command=lambda: self._change_case("toggle"))
+            try:
+                m.tk_popup(case_btn.winfo_rootx(),
+                           case_btn.winfo_rooty() + case_btn.winfo_height())
+            finally:
+                m.grab_release()
 
-        # B / I / U
-        self._btn_bold      = tk.Button(bar, text="B", font=("Segoe UI", 10, "bold"),
-                                        command=lambda: self._fmt_toggle(
-                                            rtf_io.tag_bold(), font=("Consolas",11,"bold")),
-                                        **btn_kw)
-        self._btn_bold.pack(side="left", padx=1)
-        self._btn_italic    = tk.Button(bar, text="I", font=("Segoe UI", 10, "italic"),
-                                        command=lambda: self._fmt_toggle(
-                                            rtf_io.tag_italic(), font=("Consolas",11,"italic")),
-                                        **btn_kw)
-        self._btn_italic.pack(side="left", padx=1)
-        self._btn_underline = tk.Button(bar, text="U", font=("Segoe UI", 10, "underline"),
-                                        command=lambda: self._fmt_toggle(
-                                            rtf_io.tag_underline(), underline=True),
-                                        **btn_kw)
-        self._btn_underline.pack(side="left", padx=1)
+        case_btn = tk.Button(bar, text="Aa▾", font=("Segoe UI", 10), **btn_kw,
+            command=_show_case_menu)
+        case_btn.pack(side="left", padx=(4,6))
+        ToolTip(case_btn, "Change case\nUPPER / lower / Capitalize / tOGGLE")
 
-        tk.Frame(bar, bg=T["border"], width=1).pack(side="left", fill="y", padx=4, pady=3)
+        b_btn = tk.Button(bar, text="B", font=("Segoe UI", 10, "bold"), **btn_kw,
+            command=lambda: self._fmt_toggle(rtf_io.tag_bold(),
+                font=("Consolas", 11, "bold")))
+        b_btn.pack(side="left", padx=1)
+        ToolTip(b_btn, "Bold (Ctrl+B)")
 
-        # Text color / Highlight swatch buttons
-        self._fmt_fg_canvas = tk.Canvas(bar, width=22, height=22, bg=T["tab_idle"],
-                                        highlightthickness=1, highlightbackground=T["border"],
-                                        cursor="hand2")
-        self._fmt_fg_canvas.pack(side="left", padx=1)
-        self._fmt_fg_rect   = self._fmt_fg_canvas.create_rectangle(3,3,19,19, fill="#d4d4d4", outline="")
-        self._fmt_fg_canvas.bind("<Button-1>", lambda _e: self._fmt_pick_fg())
+        i_btn = tk.Button(bar, text="I", font=("Segoe UI", 10, "italic"), **btn_kw,
+            command=lambda: self._fmt_toggle(rtf_io.tag_italic(),
+                font=("Consolas", 11, "italic")))
+        i_btn.pack(side="left", padx=1)
+        ToolTip(i_btn, "Italic (Ctrl+I)")
 
-        self._fmt_bg_canvas = tk.Canvas(bar, width=22, height=22, bg=T["tab_idle"],
-                                        highlightthickness=1, highlightbackground=T["border"],
-                                        cursor="hand2")
-        self._fmt_bg_canvas.pack(side="left", padx=1)
-        self._fmt_bg_rect   = self._fmt_bg_canvas.create_rectangle(3,3,19,19, fill="#264f78", outline="")
-        self._fmt_bg_canvas.bind("<Button-1>", lambda _e: self._fmt_pick_bg())
+        u_btn = tk.Button(bar, text="U", font=("Segoe UI", 10), **btn_kw,
+            command=lambda: self._fmt_toggle(rtf_io.tag_underline(),
+                underline=True))
+        u_btn.pack(side="left", padx=1)
+        ToolTip(u_btn, "Underline (Ctrl+U)")
 
-        tk.Frame(bar, bg=T["border"], width=1).pack(side="left", fill="y", padx=4, pady=3)
+        s_btn = tk.Button(bar, text="S̶", font=("Segoe UI", 10), **btn_kw,
+            command=lambda: self._fmt_toggle(rtf_io.tag_strikethrough(),
+                overstrike=True))
+        s_btn.pack(side="left", padx=1)
+        ToolTip(s_btn, "Strikethrough")
 
-        # Alignment
-        for symbol, align in (("≡L","left"),("≡C","center"),("≡R","right")):
-            tk.Button(bar, text=symbol, command=lambda a=align: self._fmt_set_align(a),
-                      **btn_kw).pack(side="left", padx=1)
+        self._fg_swatch = tk.Canvas(bar, width=22, height=22,
+            bg=T["tab_idle"], highlightthickness=1,
+            highlightbackground=T["border"], cursor="hand2")
+        self._fg_swatch.pack(side="left", padx=(6,1))
+        self._fg_rect = self._fg_swatch.create_rectangle(3,3,19,19,
+            fill="#ff0000", outline="")
+        self._fg_swatch.bind("<Button-1>", lambda e: self._fmt_pick_fg())
+        ToolTip(self._fg_swatch, "Text color\nClick to choose color")
+        tk.Label(bar, text="A", bg=T["tab_idle"], fg=T["text_fg"],
+                 font=("Segoe UI", 9)).pack(side="left")
 
-        # Current color state
-        self._fmt_fg_color = "#d4d4d4"
-        self._fmt_bg_color = "#264f78"
+        self._bg_swatch = tk.Canvas(bar, width=22, height=22,
+            bg=T["tab_idle"], highlightthickness=1,
+            highlightbackground=T["border"], cursor="hand2")
+        self._bg_swatch.pack(side="left", padx=(6,1))
+        self._bg_rect = self._bg_swatch.create_rectangle(3,3,19,19,
+            fill="#ffff00", outline="")
+        self._bg_swatch.bind("<Button-1>", lambda e: self._fmt_pick_bg())
+        ToolTip(self._bg_swatch, "Highlight color\nClick to choose color")
+        tk.Label(bar, text="HL", bg=T["tab_idle"], fg=T["text_fg"],
+                 font=("Segoe UI", 9)).pack(side="left")
 
-    def _fmt_toggle(self, tag, **kw):
-        """Toggle a formatting tag on the current selection."""
-        if not self._active or not self._active.text:
+        tk.Label(bar, text=" ", bg=T["tab_bar"]).pack(side="left", padx=4)
+        align_tips = {"left": "Align left", "center": "Align center", "right": "Align right"}
+        for sym, align in [("≡L","left"),("≡C","center"),("≡R","right")]:
+            ab = tk.Button(bar, text=sym, font=("Segoe UI", 10), **btn_kw,
+                command=lambda a=align: self._fmt_set_align(a))
+            ab.pack(side="left", padx=1)
+            ToolTip(ab, align_tips[align])
+
+        self._wrap_on = tk.BooleanVar(value=True)
+        wrap_btn = tk.Checkbutton(bar, text="↵ Wrap", font=("Segoe UI", 10),
+            variable=self._wrap_on, command=self._toggle_wrap,
+            bg=T["tab_bar"], fg=T["text_fg"],
+            selectcolor=T["tab_idle"], activebackground=T["tab_bar"],
+            activeforeground=T["text_fg"],
+            indicatoron=False, relief="flat", padx=6, pady=2,
+            cursor="hand2")
+        wrap_btn.pack(side="left", padx=(8,1))
+        ToolTip(wrap_btn, "Toggle word wrap\nfor the active tab")
+        self._wrap_btn = wrap_btn
+
+        clr_btn = tk.Button(bar, text="✕ fmt", font=("Segoe UI", 10), **btn_kw,
+            command=self._fmt_clear)
+        clr_btn.pack(side="left", padx=(8,1))
+        ToolTip(clr_btn, "Clear all formatting\nfrom selected text")
+
+    def _toggle_wrap(self):
+        tab = self._active
+        if tab and tab.text:
+            tab.text.configure(wrap="word" if self._wrap_on.get() else "none")
+
+    def _fmt_toggle(self, tag_name, **tag_kw):
+        tab = self._active
+        if tab is None or tab.text is None:
             return
-        txt = self._active.text
+        tw = tab.text
         try:
-            sel_start = txt.index("sel.first")
-            sel_end   = txt.index("sel.last")
+            sel_start = tw.index("sel.first")
+            sel_end   = tw.index("sel.last")
         except tk.TclError:
             return
-        # If all chars in selection have tag, remove it; otherwise add it
-        ranges = txt.tag_ranges(tag)
-        covered = False
-        if ranges:
-            # check if selection is fully covered
-            covered = any(
-                txt.compare(ranges[i], "<=", sel_start) and
-                txt.compare(ranges[i+1], ">=", sel_end)
-                for i in range(0, len(ranges), 2)
-            )
-        if covered:
-            txt.tag_remove(tag, sel_start, sel_end)
+        existing = tw.tag_ranges(tag_name)
+        has_tag  = False
+        idx = sel_start
+        while tw.compare(idx, "<", sel_end):
+            tags_here = tw.tag_names(idx)
+            if tag_name in tags_here:
+                has_tag = True
+                break
+            idx = tw.index("%s +1c" % idx)
+        if has_tag:
+            tw.tag_remove(tag_name, sel_start, sel_end)
         else:
-            txt.tag_configure(tag, **kw)
-            txt.tag_add(tag, sel_start, sel_end)
+            tw.tag_add(tag_name, sel_start, sel_end)
+            tw.tag_configure(tag_name, **tag_kw)
 
-    def _fmt_apply(self, tag, sel_start, sel_end, **kw):
-        """Apply a formatting tag+config to a range."""
-        if not self._active or not self._active.text:
+    def _fmt_apply(self, tag_name, sel_start, sel_end, **tag_kw):
+        tab = self._active
+        if tab is None or tab.text is None:
             return
-        txt = self._active.text
-        txt.tag_configure(tag, **kw)
-        txt.tag_add(tag, sel_start, sel_end)
+        tw = tab.text
+        tw.tag_add(tag_name, sel_start, sel_end)
+        tw.tag_configure(tag_name, **tag_kw)
 
-    def _fmt_set_font(self, family=None, size=None):
-        if not self._active or not self._active.text:
+    def _fmt_set_font(self, family, size):
+        tab = self._active
+        if tab is None or tab.text is None:
             return
-        txt = self._active.text
+        tw = tab.text
         try:
-            sel_start = txt.index("sel.first")
-            sel_end   = txt.index("sel.last")
+            sel_start = tw.index("sel.first")
+            sel_end   = tw.index("sel.last")
         except tk.TclError:
             return
-        family = family or self._fmt_font_var.get() or "Consolas"
-        try:
-            size = int(size or self._fmt_size_var.get() or 11)
-        except ValueError:
-            size = 11
-        tag = rtf_io.tag_font(family)
-        txt.tag_configure(tag, font=(family, size))
-        txt.tag_add(tag, sel_start, sel_end)
+        fn_tag = rtf_io.tag_font(family)
+        sz_tag = rtf_io.tag_size(size)
+        tw.tag_add(fn_tag, sel_start, sel_end)
+        tw.tag_configure(fn_tag, font=(family, size))
+        tw.tag_add(sz_tag, sel_start, sel_end)
+        tw.tag_configure(sz_tag, font=(family, size))
 
     def _fmt_pick_fg(self):
-        result = colorchooser.askcolor(color=self._fmt_fg_color,
-                                       parent=self, title="Text Color")
-        if result and result[1]:
-            self._fmt_fg_color = result[1]
-            self._fmt_fg_canvas.itemconfig(self._fmt_fg_rect, fill=result[1])
-            if not self._active or not self._active.text:
-                return
-            txt = self._active.text
-            try:
-                s, e = txt.index("sel.first"), txt.index("sel.last")
-            except tk.TclError:
-                return
-            tag = rtf_io.tag_fg(result[1])
-            txt.tag_configure(tag, foreground=result[1])
-            txt.tag_add(tag, s, e)
+        current = self._fg_swatch.itemcget(self._fg_rect, "fill") or "#ff0000"
+        r = colorchooser.askcolor(color=current, parent=self, title="Text Color")
+        if not (r and r[1]):
+            return
+        color = r[1]
+        self._fg_swatch.itemconfig(self._fg_rect, fill=color)
+        tab = self._active
+        if tab is None or tab.text is None:
+            return
+        tw = tab.text
+        try:
+            sel_start = tw.index("sel.first")
+            sel_end   = tw.index("sel.last")
+        except tk.TclError:
+            return
+        tag = rtf_io.tag_fg(color)
+        tw.tag_add(tag, sel_start, sel_end)
+        tw.tag_configure(tag, foreground=color)
 
     def _fmt_pick_bg(self):
-        result = colorchooser.askcolor(color=self._fmt_bg_color,
-                                       parent=self, title="Highlight Color")
-        if result and result[1]:
-            self._fmt_bg_color = result[1]
-            self._fmt_bg_canvas.itemconfig(self._fmt_bg_rect, fill=result[1])
-            if not self._active or not self._active.text:
-                return
-            txt = self._active.text
-            try:
-                s, e = txt.index("sel.first"), txt.index("sel.last")
-            except tk.TclError:
-                return
-            tag = rtf_io.tag_bg(result[1])
-            txt.tag_configure(tag, background=result[1])
-            txt.tag_add(tag, s, e)
+        current = self._bg_swatch.itemcget(self._bg_rect, "fill") or "#ffff00"
+        r = colorchooser.askcolor(color=current, parent=self, title="Highlight Color")
+        if not (r and r[1]):
+            return
+        color = r[1]
+        self._bg_swatch.itemconfig(self._bg_rect, fill=color)
+        tab = self._active
+        if tab is None or tab.text is None:
+            return
+        tw = tab.text
+        try:
+            sel_start = tw.index("sel.first")
+            sel_end   = tw.index("sel.last")
+        except tk.TclError:
+            return
+        tag = rtf_io.tag_bg(color)
+        tw.tag_add(tag, sel_start, sel_end)
+        tw.tag_configure(tag, background=color)
 
     def _fmt_set_align(self, align):
-        if not self._active or not self._active.text:
+        tab = self._active
+        if tab is None or tab.text is None:
             return
-        txt = self._active.text
-        # Apply alignment to whole paragraph(s) containing the selection
+        tw = tab.text
         try:
-            start = txt.index("sel.first linestart")
-            end   = txt.index("sel.last lineend")
+            sel_start = tw.index("sel.first")
+            sel_end   = tw.index("sel.last")
         except tk.TclError:
-            start = txt.index("insert linestart")
-            end   = txt.index("insert lineend")
-        for a in ("left","center","right"):
-            txt.tag_remove(rtf_io.tag_align(a), start, end)
-        if align != "left":
-            tag = rtf_io.tag_align(align)
-            txt.tag_configure(tag, justify=align)
-            txt.tag_add(tag, start, end)
+            ins = tw.index("insert")
+            sel_start = tw.index("%s linestart" % ins)
+            sel_end   = tw.index("%s lineend"   % ins)
+        for a in ("left", "center", "right"):
+            tw.tag_remove(rtf_io.tag_align(a), sel_start, sel_end)
+        tag = rtf_io.tag_align(align)
+        tw.tag_add(tag, sel_start, sel_end)
+        tw.tag_configure(tag, justify=align)
 
-    # ------------------------------------------------------------------
+    def _fmt_clear(self):
+        tab = self._active
+        if tab is None or tab.text is None:
+            return
+        tw = tab.text
+        try:
+            sel_start = tw.index("sel.first")
+            sel_end   = tw.index("sel.last")
+        except tk.TclError:
+            return
+        for tag in tw.tag_names():
+            if tag.startswith("fmt_"):
+                tw.tag_remove(tag, sel_start, sel_end)
+
+    def _change_case(self, mode):
+        tab = self._active
+        if tab is None or tab.text is None:
+            return
+        tw = tab.text
+        try:
+            sel_start = tw.index("sel.first")
+            sel_end   = tw.index("sel.last")
+        except tk.TclError:
+            return
+        text = tw.get(sel_start, sel_end)
+        if mode == "upper":
+            new = text.upper()
+        elif mode == "lower":
+            new = text.lower()
+        elif mode == "title":
+            new = text.title()
+        elif mode == "toggle":
+            new = "".join(c.lower() if c.isupper() else c.upper() for c in text)
+        else:
+            new = text
+        if new == text:
+            return
+        saved_tags = []
+        for tag in tw.tag_names():
+            ranges = tw.tag_ranges(tag)
+            for i in range(0, len(ranges), 2):
+                r0 = str(ranges[i])
+                r1 = str(ranges[i+1])
+                if tw.compare(r0, ">=", sel_start) and tw.compare(r1, "<=", sel_end):
+                    saved_tags.append((tag, r0, r1))
+        tw.delete(sel_start, sel_end)
+        tw.insert(sel_start, new)
+        new_end = tw.index("%s +%dc" % (sel_start, len(new)))
+        for tag, r0, r1 in saved_tags:
+            tw.tag_add(tag, r0, min(r1, new_end))
+            cfg = {}
+            try:
+                cfg = {k: v for k, v in tw.tag_configure(tag).items() if v}
+            except Exception:
+                pass
+        tw.tag_add("sel", sel_start, new_end)
+
+    # ----------------------------------------------------------------
     # Find / Replace bar
-    # ------------------------------------------------------------------
+    # ----------------------------------------------------------------
     def _build_findbar(self):
         T   = self._T
-        bar = tk.Frame(self, bg=T["tab_bar"], bd=0)
-        self._find_frame = bar
-        # not packed yet — shown on demand
+        bar = tk.Frame(self, bg=T["tab_bar"], pady=3)
+        self._findbar = bar
 
-        # Close button
-        close = tk.Label(bar, text="  ×  ", bg=T["tab_bar"], fg=T["close_fg"],
-                         font=("Segoe UI", 13), cursor="hand2")
-        close.pack(side="right", padx=4)
-        close.bind("<Button-1>", lambda _e: self._hide_find_bar())
-
-        # Find row
-        find_row = tk.Frame(bar, bg=T["tab_bar"])
-        find_row.pack(side="top", fill="x", padx=8, pady=(4, 2))
-        tk.Label(find_row, text="Find:", bg=T["tab_bar"], fg=T["text_fg"],
-                 font=("Segoe UI", 10), width=7, anchor="e").pack(side="left")
+        tk.Label(bar, text="Find:", bg=T["tab_bar"], fg=T["text_fg"],
+                 font=("Segoe UI", 10)).pack(side="left", padx=(6,2))
         self._find_var = tk.StringVar()
-        fe = tk.Entry(find_row, textvariable=self._find_var, width=30,
+        fe = tk.Entry(bar, textvariable=self._find_var, width=22,
                       bg=T["text_bg"], fg=T["text_fg"],
-                      insertbackground=T["text_fg"],
-                      relief="flat", bd=4, font=("Segoe UI", 10))
-        fe.pack(side="left", padx=(4, 0))
+                      insertbackground=T["text_fg"], relief="flat", bd=2)
+        fe.pack(side="left", padx=2)
         self._find_entry = fe
-        self._find_count_lbl = tk.Label(find_row, text="", bg=T["tab_bar"],
-                                        fg=T["ln_fg"], font=("Segoe UI", 9), padx=6)
-        self._find_count_lbl.pack(side="left")
-        tk.Button(find_row, text="▲", command=lambda: self._find_step(-1),
-                  bg=T["tab_idle"], fg=T["text_fg"], relief="flat",
-                  font=("Segoe UI", 9), padx=6, pady=1,
-                  cursor="hand2").pack(side="left", padx=2)
-        tk.Button(find_row, text="▼", command=lambda: self._find_step(1),
-                  bg=T["tab_idle"], fg=T["text_fg"], relief="flat",
-                  font=("Segoe UI", 9), padx=6, pady=1,
-                  cursor="hand2").pack(side="left", padx=2)
+        fe.bind("<Return>",         lambda e: self._find_step(1))
+        fe.bind("<Shift-Return>",   lambda e: self._find_step(-1))
         self._find_var.trace_add("write", lambda *_: self._run_find())
 
-        # Replace row (hidden until replace mode)
-        rep_row = tk.Frame(bar, bg=T["tab_bar"])
-        self._replace_row = rep_row
-        tk.Label(rep_row, text="Replace:", bg=T["tab_bar"], fg=T["text_fg"],
-                 font=("Segoe UI", 10), width=7, anchor="e").pack(side="left")
+        self._match_lbl = tk.Label(bar, text="", bg=T["tab_bar"],
+                                   fg=T["close_fg"], font=("Segoe UI", 9))
+        self._match_lbl.pack(side="left", padx=4)
+
+        tk.Button(bar, text="▲", bg=T["tab_idle"], fg=T["text_fg"],
+                  relief="flat", padx=4,
+                  command=lambda: self._find_step(-1)).pack(side="left", padx=1)
+        tk.Button(bar, text="▼", bg=T["tab_idle"], fg=T["text_fg"],
+                  relief="flat", padx=4,
+                  command=lambda: self._find_step(1)).pack(side="left", padx=1)
+
         self._replace_var = tk.StringVar()
-        tk.Entry(rep_row, textvariable=self._replace_var, width=30,
-                 bg=T["text_bg"], fg=T["text_fg"],
-                 insertbackground=T["text_fg"],
-                 relief="flat", bd=4, font=("Segoe UI", 10)).pack(side="left", padx=(4, 8))
-        tk.Button(rep_row, text="Replace", command=self._do_replace,
-                  bg=T["tab_idle"], fg=T["text_fg"], relief="flat",
-                  font=("Segoe UI", 9), padx=8, pady=1,
-                  cursor="hand2").pack(side="left", padx=2)
-        tk.Button(rep_row, text="Replace All", command=self._do_replace_all,
-                  bg=T["tab_idle"], fg=T["text_fg"], relief="flat",
-                  font=("Segoe UI", 9), padx=8, pady=1,
-                  cursor="hand2").pack(side="left", padx=2)
-        self._replace_lbl = tk.Label(rep_row, text="", bg=T["tab_bar"],
-                                     fg=T["ln_fg"], font=("Segoe UI", 9), padx=6)
-        self._replace_lbl.pack(side="left")
+        self._replace_lbl = tk.Label(bar, text="Replace:", bg=T["tab_bar"],
+                                     fg=T["text_fg"], font=("Segoe UI", 10))
+        re_entry = tk.Entry(bar, textvariable=self._replace_var, width=22,
+                            bg=T["text_bg"], fg=T["text_fg"],
+                            insertbackground=T["text_fg"], relief="flat", bd=2)
+        self._replace_entry = re_entry
 
-        # internal state
-        self._find_matches = []   # list of (start, end) index strings
-        self._find_idx     = -1
+        self._replace_btn = tk.Button(bar, text="Replace",
+            bg=T["tab_idle"], fg=T["text_fg"], relief="flat", padx=6,
+            command=self._do_replace)
+        self._replace_all_btn = tk.Button(bar, text="Replace All",
+            bg=T["tab_idle"], fg=T["text_fg"], relief="flat", padx=6,
+            command=self._do_replace_all)
 
-        fe.bind("<Return>",          lambda _e: self._find_step(1))
-        fe.bind("<Shift-Return>",    lambda _e: self._find_step(-1))
-        fe.bind("<Escape>",          lambda _e: self._hide_find_bar())
+        self._case_var = tk.BooleanVar(value=False)
+        tk.Checkbutton(bar, text="Aa", variable=self._case_var,
+                       bg=T["tab_bar"], fg=T["text_fg"],
+                       selectcolor=T["tab_idle"], activebackground=T["tab_bar"],
+                       command=self._run_find).pack(side="left", padx=4)
 
-    def _show_find_bar(self, replace=False):
-        self._find_frame.pack(side="bottom", fill="x",
-                              before=self._status_left.master)
-        if replace:
-            self._replace_row.pack(side="top", fill="x", padx=8, pady=(0, 4))
+        tk.Button(bar, text="✕", bg=T["tab_bar"], fg=T["close_fg"],
+                  relief="flat", padx=4,
+                  command=self._hide_find_bar).pack(side="right", padx=4)
+
+        self._find_matches   = []
+        self._find_match_idx = -1
+
+    def _show_find_bar(self, show_replace=False):
+        T = self._T
+        self._findbar.pack(side="bottom", fill="x",
+                           before=self._body_frame)
+        if show_replace:
+            self._replace_lbl.pack(side="left", padx=(12,2))
+            self._replace_entry.pack(side="left", padx=2)
+            self._replace_btn.pack(side="left", padx=2)
+            self._replace_all_btn.pack(side="left", padx=2)
         else:
-            self._replace_row.pack_forget()
+            self._replace_lbl.pack_forget()
+            self._replace_entry.pack_forget()
+            self._replace_btn.pack_forget()
+            self._replace_all_btn.pack_forget()
         self._find_entry.focus_set()
         self._find_entry.select_range(0, "end")
         self._run_find()
 
     def _hide_find_bar(self):
-        self._find_frame.pack_forget()
+        self._findbar.pack_forget()
         self._clear_find_highlights()
-        self._find_matches = []
-        self._find_idx     = -1
-        self._find_count_lbl.config(text="")
         if self._active and self._active.text:
             self._active.text.focus_set()
 
-    def _run_find(self):
+    def _run_find(self, *_):
         self._clear_find_highlights()
-        self._find_matches = []
-        self._find_idx     = -1
-        if not self._active or not self._active.text:
+        self._find_matches   = []
+        self._find_match_idx = -1
+        query = self._find_var.get()
+        if not query:
+            self._match_lbl.configure(text="")
             return
-        pattern = self._find_var.get()
-        if not pattern:
-            self._find_count_lbl.config(text="")
+        tab = self._active
+        if tab is None or tab.text is None:
             return
-        txt = self._active.text
-        txt.tag_configure("find_match",    background="#515c6a", foreground="#ffffff")
-        txt.tag_configure("find_current",  background="#f6b73c", foreground="#000000")
-        pos = "1.0"
+        tw  = tab.text
+        nocase = not self._case_var.get()
+        start  = "1.0"
         while True:
-            idx = txt.search(pattern, pos, stopindex="end", nocase=True)
-            if not idx:
+            pos = tw.search(query, start, stopindex="end", nocase=nocase)
+            if not pos:
                 break
-            end = "%s+%dc" % (idx, len(pattern))
-            txt.tag_add("find_match", idx, end)
-            self._find_matches.append((idx, end))
-            pos = end
+            end_pos = "%s +%dc" % (pos, len(query))
+            tw.tag_add("find_match", pos, end_pos)
+            self._find_matches.append(pos)
+            start = end_pos
+        tw.tag_configure("find_match", background="#515c6a", foreground="#ffffff")
         n = len(self._find_matches)
+        self._match_lbl.configure(text="%d match%s" % (n, "es" if n != 1 else ""))
         if n:
-            self._find_count_lbl.config(text="%d match%s" % (n, "es" if n != 1 else ""))
             self._find_step(1)
-        else:
-            self._find_count_lbl.config(text="No matches")
 
     def _find_step(self, direction):
         if not self._find_matches:
             return
         n = len(self._find_matches)
-        self._find_idx = (self._find_idx + direction) % n
-        start, end = self._find_matches[self._find_idx]
-        txt = self._active.text
-        txt.tag_remove("find_current", "1.0", "end")
-        txt.tag_add("find_current", start, end)
-        txt.see(start)
-        self._find_count_lbl.config(
-            text="%d / %d" % (self._find_idx + 1, n))
+        self._find_match_idx = (self._find_match_idx + direction) % n
+        pos = self._find_matches[self._find_match_idx]
+        tab = self._active
+        if tab is None or tab.text is None:
+            return
+        tw = tab.text
+        query   = self._find_var.get()
+        end_pos = "%s +%dc" % (pos, len(query))
+        tw.tag_remove("find_current", "1.0", "end")
+        tw.tag_add("find_current", pos, end_pos)
+        tw.tag_configure("find_current", background="#f6a623", foreground="#000000")
+        tw.see(pos)
+        self._match_lbl.configure(
+            text="%d / %d" % (self._find_match_idx + 1, n))
 
     def _clear_find_highlights(self):
-        if self._active and self._active.text:
-            self._active.text.tag_remove("find_match",   "1.0", "end")
-            self._active.text.tag_remove("find_current", "1.0", "end")
+        for tab in self._tabs:
+            if tab.text:
+                tab.text.tag_remove("find_match",   "1.0", "end")
+                tab.text.tag_remove("find_current", "1.0", "end")
 
     def _do_replace(self):
-        if not self._find_matches or self._find_idx < 0:
+        if not self._find_matches or self._find_match_idx < 0:
             return
-        txt         = self._active.text
-        start, end  = self._find_matches[self._find_idx]
-        replacement = self._replace_var.get()
-        txt.delete(start, end)
-        txt.insert(start, replacement)
-        self._replace_lbl.config(text="Replaced.")
-        self.after(1500, lambda: self._replace_lbl.config(text=""))
+        tab = self._active
+        if tab is None or tab.text is None:
+            return
+        tw      = tab.text
+        pos     = self._find_matches[self._find_match_idx]
+        query   = self._find_var.get()
+        repl    = self._replace_var.get()
+        end_pos = "%s +%dc" % (pos, len(query))
+        tw.delete(pos, end_pos)
+        tw.insert(pos, repl)
         self._run_find()
 
     def _do_replace_all(self):
-        if not self._active or not self._active.text:
+        tab = self._active
+        if tab is None or tab.text is None:
             return
-        pattern     = self._find_var.get()
-        replacement = self._replace_var.get()
-        if not pattern:
+        query = self._find_var.get()
+        repl  = self._replace_var.get()
+        if not query:
             return
-        txt   = self._active.text
-        count = 0
-        pos   = "1.0"
+        tw     = tab.text
+        nocase = not self._case_var.get()
+        count  = 0
+        start  = "1.0"
         while True:
-            idx = txt.search(pattern, pos, stopindex="end", nocase=True)
-            if not idx:
+            pos = tw.search(query, start, stopindex="end", nocase=nocase)
+            if not pos:
                 break
-            end = "%s+%dc" % (idx, len(pattern))
-            txt.delete(idx, end)
-            txt.insert(idx, replacement)
-            pos = "%s+%dc" % (idx, len(replacement))
+            end_pos = "%s +%dc" % (pos, len(query))
+            tw.delete(pos, end_pos)
+            tw.insert(pos, repl)
+            start = "%s +%dc" % (pos, len(repl))
             count += 1
-        self._replace_lbl.config(text="%d replaced." % count)
-        self.after(2000, lambda: self._replace_lbl.config(text=""))
-        self._run_find()
+        self._match_lbl.configure(text="Replaced %d" % count)
+        self._clear_find_highlights()
+        self._find_matches   = []
+        self._find_match_idx = -1
 
-    # ------------------------------------------------------------------
-    # Body (text area + line numbers)
-    # ------------------------------------------------------------------
-    def _build_body(self):
-        T = self._T
-        body = tk.Frame(self, bg=T["bg"])
-        body.pack(side="top", fill="both", expand=True)
-        self._body = body
-
+    # ----------------------------------------------------------------
+    # Text area right-click context menu
+    # ----------------------------------------------------------------
     def _text_context(self, event, tab):
-        T   = self._T
-        txt = tab.text
-        kw  = dict(tearoff=0, bg=T["menu_bg"], fg=T["menu_fg"],
-                   activebackground=T["menu_sel"], activeforeground=T["menu_fg"])
+        T  = self._T
+        kw = dict(tearoff=0, bg=T["menu_bg"], fg=T["menu_fg"],
+                  activebackground=T["menu_sel"], activeforeground=T["menu_fg"])
         m = tk.Menu(self, **kw)
-
-        # Undo / Redo
-        can_undo = False
-        can_redo = False
-        try:
-            txt.edit("canundo")
-            can_undo = True
-        except Exception:
-            pass
-        try:
-            txt.edit("canredo")
-            can_redo = True
-        except Exception:
-            pass
-        m.add_command(label="Undo",       command=lambda: txt.event_generate("<<Undo>>"),
-                      state="normal" if can_undo else "disabled")
-        m.add_command(label="Redo",       command=lambda: txt.event_generate("<<Redo>>"),
-                      state="normal" if can_redo else "disabled")
+        tw = tab.text
+        m.add_command(label="Cut",
+            command=lambda: tw.event_generate("<<Cut>>"))
+        m.add_command(label="Copy",
+            command=lambda: tw.event_generate("<<Copy>>"))
+        m.add_command(label="Paste",
+            command=lambda: tw.event_generate("<<Paste>>"))
+        m.add_command(label="Delete",
+            command=lambda: tw.delete("sel.first", "sel.last"))
         m.add_separator()
-
-        # Cut / Copy — only enabled when there's a selection
-        has_sel = bool(txt.tag_ranges("sel"))
-        m.add_command(label="Cut",        command=lambda: txt.event_generate("<<Cut>>"),
-                      state="normal" if has_sel else "disabled")
-        m.add_command(label="Copy",       command=lambda: txt.event_generate("<<Copy>>"),
-                      state="normal" if has_sel else "disabled")
-
-        # Paste — only enabled when clipboard has text
-        has_clip = False
-        try:
-            has_clip = bool(self.clipboard_get())
-        except Exception:
-            pass
-        m.add_command(label="Paste",      command=lambda: txt.event_generate("<<Paste>>"),
-                      state="normal" if has_clip else "disabled")
-        m.add_command(label="Delete",     command=lambda: txt.delete("sel.first", "sel.last")
-                      if has_sel else None,
-                      state="normal" if has_sel else "disabled")
+        m.add_command(label="Select All",
+            command=lambda: (tw.tag_add("sel", "1.0", "end"),
+                             tw.mark_set("insert", "end")))
         m.add_separator()
-        m.add_command(label="Select All", command=lambda: (
-            txt.tag_add("sel", "1.0", "end"),
-            txt.mark_set("insert", "end")))
-        m.add_separator()
-        # Formatting
-        m.add_command(label="Bold        Ctrl+B",
-                      command=lambda: self._fmt_toggle(rtf_io.tag_bold(), font=("Consolas",11,"bold")))
-        m.add_command(label="Italic      Ctrl+I",
-                      command=lambda: self._fmt_toggle(rtf_io.tag_italic(), font=("Consolas",11,"italic")))
-        m.add_command(label="Underline   Ctrl+U",
-                      command=lambda: self._fmt_toggle(rtf_io.tag_underline(), underline=True))
+        m.add_command(label="Bold",
+            command=lambda: self._fmt_toggle(rtf_io.tag_bold(),
+                font=("Consolas",11,"bold")))
+        m.add_command(label="Italic",
+            command=lambda: self._fmt_toggle(rtf_io.tag_italic(),
+                font=("Consolas",11,"italic")))
+        m.add_command(label="Underline",
+            command=lambda: self._fmt_toggle(rtf_io.tag_underline(),
+                underline=True))
+        m.add_command(label="Strikethrough",
+            command=lambda: self._fmt_toggle(rtf_io.tag_strikethrough(),
+                overstrike=True))
+        m.add_command(label="Clear Formatting", command=self._fmt_clear)
+        cc = tk.Menu(m, **kw)
+        cc.add_command(label="UPPER CASE",          command=lambda: self._change_case("upper"))
+        cc.add_command(label="lower case",           command=lambda: self._change_case("lower"))
+        cc.add_command(label="Capitalize Each Word", command=lambda: self._change_case("title"))
+        cc.add_command(label="tOGGLE cASE",          command=lambda: self._change_case("toggle"))
+        m.add_cascade(label="Change Case", menu=cc)
         m.add_separator()
         m.add_command(label="Find...",    command=lambda: self._show_find_bar(False))
         m.add_command(label="Replace...", command=lambda: self._show_find_bar(True))
@@ -1662,161 +1444,176 @@ class Editor(tk.Tk):
         finally:
             m.grab_release()
 
-    def _make_text_area(self, tab):
-        T    = self._T
-        frm  = tk.Frame(self._body, bg=T["bg"])
-        tab.text_frame = frm
+    # ----------------------------------------------------------------
+    # Body / text area
+    # ----------------------------------------------------------------
+    def _build_body(self):
+        T     = self._T
+        frame = tk.Frame(self, bg=T["bg"])
+        frame.pack(fill="both", expand=True)
+        self._body_frame = frame
 
-        ln = tk.Text(frm, width=4, bg=T["ln_bg"], fg=T["ln_fg"],
-                     font=("Consolas", 11), state="disabled", cursor="arrow",
-                     relief="flat", bd=0, wrap="none", takefocus=0,
-                     selectbackground=T["ln_bg"])
+    def _make_text_area(self, tab):
+        T     = self._T
+        frame = tk.Frame(self._body_frame, bg=T["bg"])
+        tab.text_frame = frame
+
+        ln = tk.Text(frame, width=4, padx=4, bg=T["ln_bg"], fg=T["ln_fg"],
+                     relief="flat", state="disabled", cursor="arrow",
+                     font=("Consolas", 11), spacing1=2,
+                     takefocus=False, wrap="none")
         ln.pack(side="left", fill="y")
         tab.linenos = ln
 
-        txt = tk.Text(frm, bg=T["text_bg"], fg=T["text_fg"],
-                      insertbackground=T["text_fg"],
-                      selectbackground=T["text_sel"],
-                      font=("Consolas", 11), relief="flat", bd=8,
-                      undo=True, wrap="none")
-        txt.pack(side="left", fill="both", expand=True)
-        tab.text = txt
+        tw = tk.Text(frame, undo=True, wrap="word",
+                     bg=T["text_bg"], fg=T["text_fg"],
+                     insertbackground=T["text_fg"],
+                     selectbackground=T["text_sel"],
+                     relief="flat", bd=8,
+                     font=("Consolas", 11), spacing1=2)
+        tw.pack(side="left", fill="both", expand=True)
+        tab.text = tw
 
-        sb = tk.Scrollbar(frm, command=txt.yview, bg=T["tab_bar"])
+        sb = tk.Scrollbar(frame, command=tw.yview,
+                          bg=T["tab_bar"], troughcolor=T["bg"],
+                          relief="flat", width=10)
         sb.pack(side="right", fill="y")
-        txt.configure(yscrollcommand=sb.set)
-
-        txt.bind("<<Modified>>", lambda e, t=tab: self._on_modified(t))
-        txt.bind("<KeyRelease>", lambda e, t=tab: self._update_linenos(t))
-        txt.bind("<MouseWheel>", lambda e, t=tab: self.after(1, lambda: self._update_linenos(t)))
-        txt.bind("<Button-3>", lambda e, t=tab: self._text_context(e, t))
+        tw.configure(yscrollcommand=lambda f, l: (sb.set(f, l),
+                                                   self._update_linenos(tab)))
+        tw.bind("<<Modified>>",    lambda e, t=tab: self._on_modified(t))
+        tw.bind("<KeyRelease>",    lambda e, t=tab: self._refresh_status())
+        tw.bind("<ButtonRelease>", lambda e, t=tab: self._refresh_status())
+        tw.bind("<Button-3>",      lambda e, t=tab: self._text_context(e, t))
+        self._apply_text_colors(tab)
 
     def _on_modified(self, tab):
-        if tab.text and tab.text.edit_modified():
-            tab.modified = True
-            self._refresh_tab_label(tab)
+        if tab.text.edit_modified():
+            if not tab.modified:
+                tab.modified = True
+                self._refresh_tab_label(tab)
             tab.text.edit_modified(False)
+            self._update_linenos(tab)
+            self._refresh_status()
 
     def _update_linenos(self, tab):
-        if not tab.text or not tab.linenos:
-            return
+        tw = tab.text
         ln = tab.linenos
         ln.configure(state="normal")
         ln.delete("1.0", "end")
-        lines = int(tab.text.index("end-1c").split(".")[0])
-        ln.insert("1.0", "\n".join(str(i) for i in range(1, lines + 1)))
+        count = int(tw.index("end-1c").split(".")[0])
+        ln.insert("1.0", "\n".join(str(i) for i in range(1, count + 1)))
         ln.configure(state="disabled")
 
+    # ----------------------------------------------------------------
+    # Status bar
+    # ----------------------------------------------------------------
     def _build_statusbar(self):
-        T   = self._T
-        bar = tk.Frame(self, bg=T["status_bg"], height=22)
+        T    = self._T
+        bar  = tk.Frame(self, bg=T["status_bg"])
         bar.pack(side="bottom", fill="x")
-        bar.pack_propagate(False)
-
-        self._status_left  = tk.Label(bar, text="", bg=T["status_bg"],
-                                      fg=T["status_fg"], font=("Segoe UI", 9),
-                                      anchor="w", padx=8)
-        self._status_left.pack(side="left")
-
-        self._status_right = tk.Label(bar, text="", bg=T["status_bg"],
-                                      fg=T["status_fg"], font=("Segoe UI", 9),
-                                      anchor="e", padx=8)
-        self._status_right.pack(side="right")
+        lbl_l = tk.Label(bar, text="", bg=T["status_bg"], fg=T["status_fg"],
+                         font=("Segoe UI", 9), anchor="w", padx=8)
+        lbl_l.pack(side="left")
+        lbl_r = tk.Label(bar, text="", bg=T["status_bg"], fg=T["status_fg"],
+                         font=("Segoe UI", 9), anchor="e", padx=8)
+        lbl_r.pack(side="right")
+        self._status_left  = lbl_l
+        self._status_right = lbl_r
 
     def _refresh_status(self):
-        if not self._active or not self._active.text:
+        tab = self._active
+        if tab is None or tab.text is None:
             self._status_left.configure(text="")
             self._status_right.configure(text="")
             return
-        txt     = self._active.text
-        content = txt.get("1.0", "end-1c")
+        tw      = tab.text
+        content = tw.get("1.0", "end-1c")
         words   = len(content.split()) if content.strip() else 0
         chars   = len(content)
-        path    = self._active.filepath or "Untitled"
-        self._status_left.configure(text=os.path.basename(path))
-        self._status_right.configure(text="Words: %d   Chars: %d" % (words, chars))
+        try:
+            row, col = tw.index("insert").split(".")
+            pos_text = "Ln %s  Col %s" % (row, int(col)+1)
+        except Exception:
+            pos_text = ""
+        self._status_left.configure(text=pos_text)
+        self._status_right.configure(
+            text="%d word%s  %d char%s" % (
+                words, "s" if words != 1 else "",
+                chars, "s" if chars != 1 else ""))
 
-    # ------------------------------------------------------------------
-    # New tab / close tab
-    # ------------------------------------------------------------------
-    def cmd_new_tab(self, title="Untitled", content=""):
-        tab = Tab(title=title)
+    # ----------------------------------------------------------------
+    # Tab management
+    # ----------------------------------------------------------------
+    def cmd_new_tab(self, event=None):
+        tab = Tab()
         self._tabs.append(tab)
         self._make_text_area(tab)
-        if content:
-            tab.text.insert("1.0", content)
-            tab.text.edit_reset()
-        self._activate(tab)
         self._rebuild_tab_buttons()
-        self._update_linenos(tab)
-        return tab
+        self._activate(tab)
 
-    def cmd_close_tab(self, tab=None):
+    def cmd_close_tab(self, tab=None, event=None):
         if tab is None:
             tab = self._active
         if tab is None:
             return
         if tab.modified:
-            name = tab.title.rstrip(" *")
-            ans  = messagebox.askyesnocancel(
-                "Unsaved changes",
-                'Save "%s" before closing?' % name,
+            ans = messagebox.askyesnocancel(
+                "Unsaved Changes",
+                "Save changes to '%s' before closing?" % tab.title.rstrip(" *"),
                 parent=self)
             if ans is None:
                 return
             if ans:
-                self.cmd_save(tab)
-
-        grp = tab.group
-        self._tabs.remove(tab)
+                self.cmd_save()
         if tab.text_frame:
             tab.text_frame.destroy()
-
-        if grp is not None:
-            remaining = [t for t in self._tabs if t.group is grp]
-            if len(remaining) == 1:
-                remaining[0].group = None
-
-        if self._active is tab:
+        old_grp = tab.group
+        self._tabs.remove(tab)
+        if old_grp:
+            remain = [t for t in self._tabs if t.group is old_grp]
+            if len(remain) == 1:
+                remain[0].group = None
+        if tab is self._active:
             self._active = None
             if self._tabs:
                 self._activate(self._tabs[-1])
-
         self._rebuild_tab_buttons()
-
         if not self._tabs:
             self.cmd_new_tab()
 
-    # ------------------------------------------------------------------
-    # Quit / session
-    # ------------------------------------------------------------------
+    # ----------------------------------------------------------------
+    # Session persistence
+    # ----------------------------------------------------------------
     def _on_quit(self):
         self._save_session()
         self.destroy()
 
     def _save_session(self):
-        data = {"tabs": [], "groups": {}}
-        grp_map = {}
+        groups  = {}
+        tab_list = []
         for tab in self._tabs:
             grp_id = None
-            if tab.group is not None:
-                grp_id = id(tab.group)
-                if grp_id not in grp_map:
-                    grp_map[grp_id] = {
-                        "name":      tab.group.label,
-                        "color":     tab.group.color,
+            if tab.group:
+                gid = str(tab.group.id)
+                if gid not in groups:
+                    groups[gid] = {
+                        "label":    tab.group.label,
+                        "color":    tab.group.color,
                         "collapsed": tab.group.collapsed,
                     }
-                    data["groups"][str(grp_id)] = grp_map[grp_id]
-            data["tabs"].append({
-                "title":    tab.title.rstrip(" *"),
+                grp_id = gid
+            tab_list.append({
+                "title":    tab.title,
                 "filepath": tab.filepath,
                 "color":    tab.color,
                 "text_bg":  tab.text_bg,
                 "text_fg":  tab.text_fg,
-                "group_id": str(grp_id) if grp_id is not None else None,
+                "group_id": grp_id,
+                "active":   tab is self._active,
                 "content":  tab.text.get("1.0", "end-1c") if tab.text else "",
             })
+        data = {"tabs": tab_list, "groups": groups,
+                "theme": self._theme_name}
         try:
             with open(SESSION_FILE, "w", encoding="utf-8") as f:
                 json.dump(data, f, indent=2)
@@ -1824,47 +1621,58 @@ class Editor(tk.Tk):
             pass
 
     def _load_session(self):
+        if not os.path.exists(SESSION_FILE):
+            return False
         try:
-            with open(SESSION_FILE, "r", encoding="utf-8") as f:
+            with open(SESSION_FILE, encoding="utf-8") as f:
                 data = json.load(f)
         except Exception:
             return False
-        groups_by_id = {}
+
+        theme = data.get("theme", "dark")
+        if theme in THEMES:
+            self._theme_name = theme
+            self._T = THEMES[theme]
+            self.configure(bg=self._T["bg"])
+
         raw_groups = data.get("groups", {})
         if not isinstance(raw_groups, dict):
             raw_groups = {}
+
+        group_map = {}
         for gid, gdata in raw_groups.items():
-            grp = TabGroup()
-            grp.label     = gdata.get("name", "Group")
-            grp.color     = gdata.get("color")
+            grp = TabGroup(color=gdata.get("color"))
+            grp.label     = gdata.get("label", grp.label)
             grp.collapsed = gdata.get("collapsed", False)
-            groups_by_id[gid] = grp
-        tabs_data = data.get("tabs", [])
-        if not tabs_data:
-            return False
-        for td in tabs_data:
-            tab = self.cmd_new_tab(title=td.get("title", "Untitled"))
-            if tab and tab.text:
-                tab.text.insert("1.0", td.get("content", ""))
+            group_map[gid] = grp
+
+        active_tab = None
+        for tdata in data.get("tabs", []):
+            tab          = Tab(tdata.get("title", "Untitled"))
+            tab.filepath = tdata.get("filepath")
+            tab.color    = tdata.get("color")
+            tab.text_bg  = tdata.get("text_bg")
+            tab.text_fg  = tdata.get("text_fg")
+            gid          = tdata.get("group_id")
+            if gid and gid in group_map:
+                tab.group = group_map[gid]
+            self._tabs.append(tab)
+            self._make_text_area(tab)
+            content = tdata.get("content", "")
+            if content and tab.text:
+                tab.text.insert("1.0", content)
                 tab.text.edit_reset()
-                tab.modified  = False
-                tab.filepath  = td.get("filepath")
-                tab.color     = td.get("color")
-                tab.text_bg   = td.get("text_bg")
-                tab.text_fg   = td.get("text_fg")
-                gid = td.get("group_id")
-                if gid and gid in groups_by_id:
-                    tab.group = groups_by_id[gid]
-                self._refresh_tab_label(tab)
+            if tdata.get("active"):
+                active_tab = tab
+
+        if not self._tabs:
+            return False
+
         self._rebuild_tab_buttons()
-        if self._tabs:
-            self._activate(self._tabs[0])
+        self._activate(active_tab or self._tabs[-1])
         return True
 
 
-# ---------------------------------------------------------------------------
-# Entry point
-# ---------------------------------------------------------------------------
 def main():
     import traceback
     log_path = os.path.join(_data_dir(), "jotter_error.log")

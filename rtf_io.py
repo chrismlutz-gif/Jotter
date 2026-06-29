@@ -9,10 +9,11 @@ import re
 # ---------------------------------------------------------------------------
 # Tag-name conventions  (shared between parser and writer)
 # ---------------------------------------------------------------------------
-def tag_bold():         return "fmt_bold"
-def tag_italic():       return "fmt_italic"
-def tag_underline():    return "fmt_underline"
-def tag_bold_italic():  return "fmt_bold_italic"
+def tag_bold():          return "fmt_bold"
+def tag_italic():        return "fmt_italic"
+def tag_underline():     return "fmt_underline"
+def tag_strikethrough(): return "fmt_strike"
+def tag_bold_italic():   return "fmt_bold_italic"
 def tag_fg(color):      return "fmt_fg_" + color.lstrip("#").lower()
 def tag_bg(color):      return "fmt_bg_" + color.lstrip("#").lower()
 def tag_font(name):     return "fmt_fn_" + re.sub(r'\W+', '_', name).strip('_')
@@ -112,9 +113,10 @@ def _flush(widget, chars, state, fonts, colors):
         except Exception:
             pass
 
-    b  = state.get('b',  False)
-    it = state.get('i',  False)
-    ul = state.get('ul', False)
+    b  = state.get('b',      False)
+    it = state.get('i',      False)
+    ul = state.get('ul',     False)
+    sk = state.get('strike', False)
 
     if b and it:
         cfg(tag_bold_italic(), font=("Consolas", 11, "bold italic"))
@@ -129,6 +131,10 @@ def _flush(widget, chars, state, fonts, colors):
     if ul:
         cfg(tag_underline(), underline=True)
         widget.tag_add(tag_underline(), start, end)
+
+    if sk:
+        cfg(tag_strikethrough(), overstrike=True)
+        widget.tag_add(tag_strikethrough(), start, end)
 
     fs = state.get('fs', 24)
     pt = max(6, fs // 2)
@@ -228,6 +234,8 @@ def parse_rtf(widget, rtf_string):
         elif cw == 'i':   state['i']  = (n != 0)
         elif cw == 'ul':  state['ul'] = True
         elif cw in ('ulnone', 'ul0'): state['ul'] = False
+        elif cw == 'strike': state['strike'] = (n != 0)
+        elif cw == 'striked0': state['strike'] = False
         elif cw == 'fs':  state['fs'] = n if n is not None else 24
         elif cw == 'f':   state['f']  = n if n is not None else 0
         elif cw == 'cf':  state['cf'] = n if n is not None else 0
@@ -299,7 +307,7 @@ def generate_rtf(widget):
         buf.append('}')
 
     # Content
-    prev = dict(b=False, i=False, ul=False,
+    prev = dict(b=False, i=False, ul=False, strike=False,
                 fg=None, bg=None, fn=None, sz=11, al='left')
     body = []
     lines = content.split('\n')
@@ -316,16 +324,17 @@ def generate_rtf(widget):
     for li, line in enumerate(lines):
         if li > 0:
             body.append(r'\pard\ql' + '\n' + r'\par' + '\n')
-            prev.update(b=False, i=False, ul=False,
+            prev.update(b=False, i=False, ul=False, strike=False,
                         fg=None, bg=None, fn=None, sz=11, al='left')
 
         for char in line:
             tags = char_tags[ci] if ci < len(char_tags) else frozenset()
             ci += 1
 
-            b  = tag_bold()       in tags or tag_bold_italic() in tags
-            it = tag_italic()     in tags or tag_bold_italic() in tags
-            ul = tag_underline()  in tags
+            b  = tag_bold()          in tags or tag_bold_italic() in tags
+            it = tag_italic()        in tags or tag_bold_italic() in tags
+            ul = tag_underline()     in tags
+            sk = tag_strikethrough() in tags
 
             fg  = next((color_from_tag(t) for t in tags if t.startswith("fmt_fg_")), None)
             bg  = next((color_from_tag(t) for t in tags if t.startswith("fmt_bg_")), None)
@@ -334,25 +343,40 @@ def generate_rtf(widget):
             al  = next((align_from_tag(t) for t in tags if t.startswith("fmt_al_")), 'left')
 
             ctrl = []
-            if b  != prev['b']:   ctrl.append(r'\b'   + ('' if b  else '0')); prev['b']  = b
-            if it != prev['i']:   ctrl.append(r'\i'   + ('' if it else '0')); prev['i']  = it
-            if ul != prev['ul']:  ctrl.append(r'\ul'  + ('' if ul else 'none')); prev['ul'] = ul
+            if b  != prev['b']:      ctrl.append(r'\b'      + ('' if b  else '0'));    prev['b']      = b
+            if it != prev['i']:      ctrl.append(r'\i'      + ('' if it else '0'));    prev['i']      = it
+            if ul != prev['ul']:     ctrl.append(r'\ul'     + ('' if ul else 'none')); prev['ul']     = ul
+            if sk != prev['strike']: ctrl.append(r'\strike' + ('' if sk else '0'));    prev['strike'] = sk
             if sz != prev['sz']:  ctrl.append(r'\fs%d' % (sz * 2));           prev['sz'] = sz
             if fn != prev['fn']:
                 fi = get_fi(fn) + 1 if fn else 0
                 ctrl.append(r'\f%d' % fi); prev['fn'] = fn
             if fg != prev['fg']:
-                ctrl.append(r'\cf%d' % (get_ci(fg) if fg else 0)); prev['fg'] = fg
+                ci2 = get_ci(fg) + 1 if fg else 0
+                ctrl.append(r'\cf%d' % ci2); prev['fg'] = fg
             if bg != prev['bg']:
-                ctrl.append(r'\highlight%d' % (get_ci(bg) if bg else 0)); prev['bg'] = bg
+                ci2 = get_ci(bg) + 1 if bg else 0
+                ctrl.append(r'\highlight%d' % ci2); prev['bg'] = bg
             if al != prev['al']:
-                ctrl.append({'center': r'\qc', 'right': r'\qr'}.get(al, r'\ql'))
-                prev['al'] = al
+                ql = {'left': r'\ql', 'center': r'\qc', 'right': r'\qr'}.get(al, r'\ql')
+                ctrl.append(ql); prev['al'] = al
 
-            body.append((''.join(ctrl) + ' ' if ctrl else '') + escape(char))
+            if ctrl:
+                body.append('{' + ''.join(ctrl) + ' }')
+            body.append(_rtf_escape(char))
 
-        ci += 1  # newline char
-
-    buf.append(''.join(body))
-    buf.append('}')
-    return ''.join(buf)
+    body.append(r'\par' + '\n}')
+    header = [r'{\rtf1\ansi\deff0']
+    header.append(r'{\fonttbl')
+    for fn2, fi2 in sorted(font_idx.items(), key=lambda x: x[1]):
+        header.append(r'{\f%d\fnil\fcharset0 %s;}' % (fi2, fn2))
+    header.append('}')
+    header.append(r'{\colortbl ;')
+    for rgb, ci2 in sorted(color_idx.items(), key=lambda x: x[1]):
+        r2 = int(rgb[1:3], 16)
+        g2 = int(rgb[3:5], 16)
+        b2 = int(rgb[5:7], 16)
+        header.append(r'\red%d\green%d\blue%d;' % (r2, g2, b2))
+    header.append('}')
+    header.append(r'\f0\fs22\ql' + '\n')
+    return '\n'.join(header) + '\n' + ''.join(body)

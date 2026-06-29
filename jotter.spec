@@ -9,7 +9,7 @@ a = Analysis(
     binaries=[],
     datas=[],
     hiddenimports=['tkinter', 'tkinter.filedialog', 'tkinter.messagebox',
-                   'tkinter.colorchooser', 'tkinter.simpledialog'],
+                   'tkinter.colorchooser', 'tkinter.simpledialog', 'rtf_io'],
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],
