@@ -18,10 +18,12 @@ editor.py -- Dark-mode text editor
 """
 
 import tkinter as tk
-from tkinter import filedialog, messagebox, colorchooser, simpledialog
+from tkinter import filedialog, messagebox, colorchooser, simpledialog, font as tkfont
+from tkinter import ttk
 import os
 import sys
 import json
+import rtf_io
 
 def _data_dir():
     """Return a writable directory for persistent data.
@@ -122,6 +124,8 @@ class Tab:
         self.filepath   = None
         self.modified   = False
         self.color      = None
+        self.text_bg    = None
+        self.text_fg    = None
         self.group      = None
         self.text_frame = None
         self.text       = None
@@ -142,7 +146,7 @@ class Editor(tk.Tk):
         super().__init__()
         self.title("Jotter")
         self.geometry("1100x740")
-        self.minsize(640, 440)
+        self.minsize(320, 220)
 
         self._always_on_top = tk.BooleanVar(value=False)
         self._theme_name    = "dark"
@@ -165,6 +169,7 @@ class Editor(tk.Tk):
         self.configure(bg=self._T["bg"])
         self._build_menu()
         self._build_tab_bar()
+        self._build_fmt_toolbar()
         self._build_body()
         self._build_statusbar()
         self._build_findbar()
@@ -176,6 +181,9 @@ class Editor(tk.Tk):
         self.bind("<Control-w>", lambda _e: self.cmd_close_tab())
         self.bind("<Control-f>", lambda _e: self._show_find_bar(False))
         self.bind("<Control-h>", lambda _e: self._show_find_bar(True))
+        self.bind("<Control-b>", lambda _e: self._fmt_toggle(rtf_io.tag_bold(), font=("Consolas",11,"bold")))
+        self.bind("<Control-i>", lambda _e: self._fmt_toggle(rtf_io.tag_italic(), font=("Consolas",11,"italic")))
+        self.bind("<Control-u>", lambda _e: self._fmt_toggle(rtf_io.tag_underline(), underline=True))
         self.protocol("WM_DELETE_WINDOW", self._on_quit)
 
         if not self._load_session():
@@ -428,6 +436,7 @@ class Editor(tk.Tk):
         if tab.text_frame:
             tab.text_frame.pack(fill="both", expand=True)
         if tab.text:
+            self._apply_text_colors(tab)
             tab.text.focus_set()
         self._restore_active_highlight()
         self._refresh_status()
@@ -909,14 +918,44 @@ class Editor(tk.Tk):
         kw = dict(tearoff=0, bg=T["menu_bg"], fg=T["menu_fg"],
                   activebackground=T["menu_sel"], activeforeground=T["menu_fg"])
         m = tk.Menu(self, **kw)
-        m.add_command(label="Rename...",      command=lambda: self._rename_tab(tab))
-        m.add_command(label="Change Color...",command=lambda: self._show_tab_color_picker(tab))
+        m.add_command(label="Rename...",           command=lambda: self._rename_tab(tab))
+        m.add_command(label="Tab Color...",        command=lambda: self._show_tab_color_picker(tab))
+        m.add_command(label="Text Background...",  command=lambda: self._pick_text_bg(tab))
+        m.add_command(label="Text Color...",       command=lambda: self._pick_text_fg(tab))
+        m.add_command(label="Reset Text Colors",   command=lambda: self._reset_text_colors(tab))
         m.add_separator()
-        m.add_command(label="Close",          command=lambda: self.cmd_close_tab(tab))
+        m.add_command(label="Close",               command=lambda: self.cmd_close_tab(tab))
         try:
             m.tk_popup(event.x_root, event.y_root)
         finally:
             m.grab_release()
+
+    def _pick_text_bg(self, tab):
+        result = colorchooser.askcolor(
+            color=tab.text_bg or self._T["text_bg"],
+            parent=self, title="Text Background Color")
+        if result and result[1]:
+            tab.text_bg = result[1]
+            self._apply_text_colors(tab)
+
+    def _pick_text_fg(self, tab):
+        result = colorchooser.askcolor(
+            color=tab.text_fg or self._T["text_fg"],
+            parent=self, title="Text Color")
+        if result and result[1]:
+            tab.text_fg = result[1]
+            self._apply_text_colors(tab)
+
+    def _reset_text_colors(self, tab):
+        tab.text_bg = None
+        tab.text_fg = None
+        self._apply_text_colors(tab)
+
+    def _apply_text_colors(self, tab):
+        if tab.text:
+            bg = tab.text_bg or self._T["text_bg"]
+            fg = tab.text_fg or self._T["text_fg"]
+            tab.text.configure(bg=bg, fg=fg, insertbackground=fg)
 
     def _rename_tab(self, tab):
         name = simpledialog.askstring(
@@ -983,7 +1022,7 @@ class Editor(tk.Tk):
         hdr.pack(fill="x")
         tk.Label(hdr, text="Jotter", bg="#007acc", fg="#ffffff",
                  font=("Segoe UI", 22, "bold")).pack()
-        tk.Label(hdr, text="Version 1.2", bg="#007acc", fg="#cce4f7",
+        tk.Label(hdr, text="Version 2.0", bg="#007acc", fg="#cce4f7",
                  font=("Segoe UI", 10)).pack()
 
         # Body
@@ -992,9 +1031,10 @@ class Editor(tk.Tk):
 
         # Description
         tk.Label(body,
-                 text="Jotter is a lightweight, dark-mode text editor built for speed and"
-                      " organisation. Open as many tabs as you like, drag them to reorder,"
-                      " and group related tabs together visually.",
+                 text="Jotter is a lightweight text editor built for speed and organisation."
+                      " Open as many tabs as you like, drag them to reorder, group related"
+                      " tabs together, and format rich text with fonts, colours, and styles."
+                      " Supports plain text and RTF files.",
                  bg=T["bg"], fg=T["text_fg"], font=("Segoe UI", 10),
                  wraplength=460, justify="left").pack(anchor="w", pady=(0, 12))
 
@@ -1009,11 +1049,14 @@ class Editor(tk.Tk):
             ("Drag one group onto another", "Merge the groups"),
             ("Click group strip/label", "Collapse / expand the group"),
             ("Double-click group label","Rename the group"),
-            ("Right-click a tab",       "Rename, recolour, or close it"),
+            ("Right-click a tab",       "Rename, recolour, text bg/fg, or close"),
             ("Right-click group strip", "Recolour, rename, or ungroup"),
+            ("Right-click text area",   "Cut/Copy/Paste, Bold/Italic/Underline, Find"),
             ("Click the colour dot",    "Pick a tab accent colour"),
             ("Ctrl+N / Ctrl+W",         "New tab / close tab"),
-            ("Ctrl+O / Ctrl+S",         "Open file / save file"),
+            ("Ctrl+O / Ctrl+S",         "Open file / save file (.txt or .rtf)"),
+            ("Ctrl+F / Ctrl+H",         "Find / Find & Replace"),
+            ("Ctrl+B / Ctrl+I / Ctrl+U","Bold / Italic / Underline"),
         )
         grid = tk.Frame(body, bg=T["bg"])
         grid.pack(anchor="w", pady=(4, 12))
@@ -1089,22 +1132,31 @@ class Editor(tk.Tk):
         path = filedialog.askopenfilename(
             parent=self,
             title="Open file",
-            filetypes=[("Text files", "*.txt"), ("All files", "*.*")])
+            filetypes=[("RTF files", "*.rtf"),
+                       ("Text files", "*.txt"),
+                       ("All files", "*.*")])
         if not path:
             return
+        is_rtf = path.lower().endswith(".rtf")
         try:
-            with open(path, "r", encoding="utf-8", errors="replace") as f:
+            mode = "rb" if is_rtf else "r"
+            enc  = None if is_rtf else "utf-8"
+            with open(path, mode, **({"encoding": enc, "errors": "replace"} if not is_rtf else {})) as f:
                 content = f.read()
+            if is_rtf:
+                content = content.decode("latin-1", errors="replace")
         except Exception as e:
             messagebox.showerror("Open failed", str(e), parent=self)
             return
-        import os as _os
-        tab = self.cmd_new_tab(title=_os.path.basename(path))
-        tab.path     = path
+        tab = self.cmd_new_tab(title=os.path.basename(path))
+        tab.filepath = path
         tab.modified = False
         if tab.text:
             tab.text.delete("1.0", "end")
-            tab.text.insert("1.0", content)
+            if is_rtf:
+                rtf_io.parse_rtf(tab.text, content)
+            else:
+                tab.text.insert("1.0", content)
             tab.text.edit_reset()
         self._refresh_tab_label(tab)
 
@@ -1113,12 +1165,18 @@ class Editor(tk.Tk):
             tab = self._active
         if tab is None:
             return
-        if tab.path is None:
+        if tab.filepath is None:
             self.cmd_save_as(tab)
             return
+        is_rtf = tab.filepath.lower().endswith(".rtf")
         try:
-            with open(tab.path, "w", encoding="utf-8") as f:
-                f.write(tab.text.get("1.0", "end-1c"))
+            if is_rtf:
+                data = rtf_io.generate_rtf(tab.text).encode("latin-1", errors="replace")
+                with open(tab.filepath, "wb") as f:
+                    f.write(data)
+            else:
+                with open(tab.filepath, "w", encoding="utf-8") as f:
+                    f.write(tab.text.get("1.0", "end-1c"))
             tab.modified = False
             self._refresh_tab_label(tab)
         except Exception as e:
@@ -1133,12 +1191,13 @@ class Editor(tk.Tk):
             parent=self,
             title="Save As",
             defaultextension=".txt",
-            filetypes=[("Text files", "*.txt"), ("All files", "*.*")])
+            filetypes=[("RTF files", "*.rtf"),
+                       ("Text files", "*.txt"),
+                       ("All files", "*.*")])
         if not path:
             return
-        import os as _os
-        tab.path  = path
-        tab.title = _os.path.basename(path)
+        tab.filepath = path
+        tab.title    = os.path.basename(path)
         self.cmd_save(tab)
 
     def cmd_toggle_theme(self):
@@ -1172,6 +1231,191 @@ class Editor(tk.Tk):
         self._rebuild_tab_buttons()
         if self._tabs:
             self._activate(self._tabs[0])
+
+    # ------------------------------------------------------------------
+    # Formatting toolbar
+    # ------------------------------------------------------------------
+    def _build_fmt_toolbar(self):
+        T   = self._T
+        bar = tk.Frame(self, bg=T["tab_bar"], pady=3)
+        bar.pack(side="top", fill="x")
+        self._fmt_bar = bar
+
+        btn_kw = dict(bg=T["tab_idle"], fg=T["text_fg"], relief="flat",
+                      activebackground=T["tab_hover"], activeforeground=T["text_fg"],
+                      padx=7, pady=2, cursor="hand2", bd=0)
+
+        # Font family
+        families = sorted(set(tkfont.families()))
+        self._fmt_font_var = tk.StringVar(value="Consolas")
+        ff = ttk.Combobox(bar, textvariable=self._fmt_font_var,
+                          values=families, width=18, state="readonly")
+        ff.pack(side="left", padx=(6,2), pady=1)
+        ff.bind("<<ComboboxSelected>>",
+                lambda _e: self._fmt_set_font(family=self._fmt_font_var.get()))
+
+        # Font size
+        self._fmt_size_var = tk.StringVar(value="11")
+        fs = ttk.Combobox(bar, textvariable=self._fmt_size_var,
+                          values=[str(s) for s in (6,7,8,9,10,11,12,14,16,18,20,24,28,32,36,48,72)],
+                          width=4)
+        fs.pack(side="left", padx=2, pady=1)
+        fs.bind("<<ComboboxSelected>>",
+                lambda _e: self._fmt_set_font(size=int(self._fmt_size_var.get())))
+        fs.bind("<Return>",
+                lambda _e: self._fmt_set_font(size=int(self._fmt_size_var.get() or 11)))
+
+        # Separator
+        tk.Frame(bar, bg=T["border"], width=1).pack(side="left", fill="y", padx=4, pady=3)
+
+        # B / I / U
+        self._btn_bold      = tk.Button(bar, text="B", font=("Segoe UI", 10, "bold"),
+                                        command=lambda: self._fmt_toggle(
+                                            rtf_io.tag_bold(), font=("Consolas",11,"bold")),
+                                        **btn_kw)
+        self._btn_bold.pack(side="left", padx=1)
+        self._btn_italic    = tk.Button(bar, text="I", font=("Segoe UI", 10, "italic"),
+                                        command=lambda: self._fmt_toggle(
+                                            rtf_io.tag_italic(), font=("Consolas",11,"italic")),
+                                        **btn_kw)
+        self._btn_italic.pack(side="left", padx=1)
+        self._btn_underline = tk.Button(bar, text="U", font=("Segoe UI", 10, "underline"),
+                                        command=lambda: self._fmt_toggle(
+                                            rtf_io.tag_underline(), underline=True),
+                                        **btn_kw)
+        self._btn_underline.pack(side="left", padx=1)
+
+        tk.Frame(bar, bg=T["border"], width=1).pack(side="left", fill="y", padx=4, pady=3)
+
+        # Text color / Highlight swatch buttons
+        self._fmt_fg_canvas = tk.Canvas(bar, width=22, height=22, bg=T["tab_idle"],
+                                        highlightthickness=1, highlightbackground=T["border"],
+                                        cursor="hand2")
+        self._fmt_fg_canvas.pack(side="left", padx=1)
+        self._fmt_fg_rect   = self._fmt_fg_canvas.create_rectangle(3,3,19,19, fill="#d4d4d4", outline="")
+        self._fmt_fg_canvas.bind("<Button-1>", lambda _e: self._fmt_pick_fg())
+
+        self._fmt_bg_canvas = tk.Canvas(bar, width=22, height=22, bg=T["tab_idle"],
+                                        highlightthickness=1, highlightbackground=T["border"],
+                                        cursor="hand2")
+        self._fmt_bg_canvas.pack(side="left", padx=1)
+        self._fmt_bg_rect   = self._fmt_bg_canvas.create_rectangle(3,3,19,19, fill="#264f78", outline="")
+        self._fmt_bg_canvas.bind("<Button-1>", lambda _e: self._fmt_pick_bg())
+
+        tk.Frame(bar, bg=T["border"], width=1).pack(side="left", fill="y", padx=4, pady=3)
+
+        # Alignment
+        for symbol, align in (("≡L","left"),("≡C","center"),("≡R","right")):
+            tk.Button(bar, text=symbol, command=lambda a=align: self._fmt_set_align(a),
+                      **btn_kw).pack(side="left", padx=1)
+
+        # Current color state
+        self._fmt_fg_color = "#d4d4d4"
+        self._fmt_bg_color = "#264f78"
+
+    def _fmt_toggle(self, tag, **kw):
+        """Toggle a formatting tag on the current selection."""
+        if not self._active or not self._active.text:
+            return
+        txt = self._active.text
+        try:
+            sel_start = txt.index("sel.first")
+            sel_end   = txt.index("sel.last")
+        except tk.TclError:
+            return
+        # If all chars in selection have tag, remove it; otherwise add it
+        ranges = txt.tag_ranges(tag)
+        covered = False
+        if ranges:
+            # check if selection is fully covered
+            covered = any(
+                txt.compare(ranges[i], "<=", sel_start) and
+                txt.compare(ranges[i+1], ">=", sel_end)
+                for i in range(0, len(ranges), 2)
+            )
+        if covered:
+            txt.tag_remove(tag, sel_start, sel_end)
+        else:
+            txt.tag_configure(tag, **kw)
+            txt.tag_add(tag, sel_start, sel_end)
+
+    def _fmt_apply(self, tag, sel_start, sel_end, **kw):
+        """Apply a formatting tag+config to a range."""
+        if not self._active or not self._active.text:
+            return
+        txt = self._active.text
+        txt.tag_configure(tag, **kw)
+        txt.tag_add(tag, sel_start, sel_end)
+
+    def _fmt_set_font(self, family=None, size=None):
+        if not self._active or not self._active.text:
+            return
+        txt = self._active.text
+        try:
+            sel_start = txt.index("sel.first")
+            sel_end   = txt.index("sel.last")
+        except tk.TclError:
+            return
+        family = family or self._fmt_font_var.get() or "Consolas"
+        try:
+            size = int(size or self._fmt_size_var.get() or 11)
+        except ValueError:
+            size = 11
+        tag = rtf_io.tag_font(family)
+        txt.tag_configure(tag, font=(family, size))
+        txt.tag_add(tag, sel_start, sel_end)
+
+    def _fmt_pick_fg(self):
+        result = colorchooser.askcolor(color=self._fmt_fg_color,
+                                       parent=self, title="Text Color")
+        if result and result[1]:
+            self._fmt_fg_color = result[1]
+            self._fmt_fg_canvas.itemconfig(self._fmt_fg_rect, fill=result[1])
+            if not self._active or not self._active.text:
+                return
+            txt = self._active.text
+            try:
+                s, e = txt.index("sel.first"), txt.index("sel.last")
+            except tk.TclError:
+                return
+            tag = rtf_io.tag_fg(result[1])
+            txt.tag_configure(tag, foreground=result[1])
+            txt.tag_add(tag, s, e)
+
+    def _fmt_pick_bg(self):
+        result = colorchooser.askcolor(color=self._fmt_bg_color,
+                                       parent=self, title="Highlight Color")
+        if result and result[1]:
+            self._fmt_bg_color = result[1]
+            self._fmt_bg_canvas.itemconfig(self._fmt_bg_rect, fill=result[1])
+            if not self._active or not self._active.text:
+                return
+            txt = self._active.text
+            try:
+                s, e = txt.index("sel.first"), txt.index("sel.last")
+            except tk.TclError:
+                return
+            tag = rtf_io.tag_bg(result[1])
+            txt.tag_configure(tag, background=result[1])
+            txt.tag_add(tag, s, e)
+
+    def _fmt_set_align(self, align):
+        if not self._active or not self._active.text:
+            return
+        txt = self._active.text
+        # Apply alignment to whole paragraph(s) containing the selection
+        try:
+            start = txt.index("sel.first linestart")
+            end   = txt.index("sel.last lineend")
+        except tk.TclError:
+            start = txt.index("insert linestart")
+            end   = txt.index("insert lineend")
+        for a in ("left","center","right"):
+            txt.tag_remove(rtf_io.tag_align(a), start, end)
+        if align != "left":
+            tag = rtf_io.tag_align(align)
+            txt.tag_configure(tag, justify=align)
+            txt.tag_add(tag, start, end)
 
     # ------------------------------------------------------------------
     # Find / Replace bar
@@ -1399,17 +1643,20 @@ class Editor(tk.Tk):
                       if has_sel else None,
                       state="normal" if has_sel else "disabled")
         m.add_separator()
-
-        # Select All
         m.add_command(label="Select All", command=lambda: (
             txt.tag_add("sel", "1.0", "end"),
             txt.mark_set("insert", "end")))
         m.add_separator()
-
-        # Find / Replace
+        # Formatting
+        m.add_command(label="Bold        Ctrl+B",
+                      command=lambda: self._fmt_toggle(rtf_io.tag_bold(), font=("Consolas",11,"bold")))
+        m.add_command(label="Italic      Ctrl+I",
+                      command=lambda: self._fmt_toggle(rtf_io.tag_italic(), font=("Consolas",11,"italic")))
+        m.add_command(label="Underline   Ctrl+U",
+                      command=lambda: self._fmt_toggle(rtf_io.tag_underline(), underline=True))
+        m.add_separator()
         m.add_command(label="Find...",    command=lambda: self._show_find_bar(False))
         m.add_command(label="Replace...", command=lambda: self._show_find_bar(True))
-
         try:
             m.tk_popup(event.x_root, event.y_root)
         finally:
@@ -1446,29 +1693,20 @@ class Editor(tk.Tk):
 
     def _on_modified(self, tab):
         if tab.text and tab.text.edit_modified():
-            if not tab.modified:
-                tab.modified = True
-                tab.title    = tab.title.rstrip(" *") + " *"
-                if tab.title_lbl:
-                    tab.title_lbl.config(text=tab.title)
+            tab.modified = True
+            self._refresh_tab_label(tab)
             tab.text.edit_modified(False)
-            self._update_linenos(tab)
-            self._refresh_status()
 
     def _update_linenos(self, tab):
-        if not tab.linenos or not tab.text:
+        if not tab.text or not tab.linenos:
             return
-        ln  = tab.linenos
-        txt = tab.text
+        ln = tab.linenos
         ln.configure(state="normal")
         ln.delete("1.0", "end")
-        nlines = int(txt.index("end-1c").split(".")[0])
-        ln.insert("1.0", "\n".join(str(i) for i in range(1, nlines + 1)))
+        lines = int(tab.text.index("end-1c").split(".")[0])
+        ln.insert("1.0", "\n".join(str(i) for i in range(1, lines + 1)))
         ln.configure(state="disabled")
 
-    # ------------------------------------------------------------------
-    # Status bar
-    # ------------------------------------------------------------------
     def _build_statusbar(self):
         T   = self._T
         bar = tk.Frame(self, bg=T["status_bg"], height=22)
@@ -1487,38 +1725,31 @@ class Editor(tk.Tk):
 
     def _refresh_status(self):
         if not self._active or not self._active.text:
+            self._status_left.configure(text="")
+            self._status_right.configure(text="")
             return
-        txt  = self._active.text
-        body = txt.get("1.0", "end-1c")
-        words = len(body.split()) if body.strip() else 0
-        chars = len(body)
-        try:
-            row, col = txt.index("insert").split(".")
-        except Exception:
-            row, col = "1", "0"
-        self._status_left.configure(
-            text="Ln %s, Col %s" % (row, int(col) + 1))
-        self._status_right.configure(
-            text="Words: %d   Chars: %d" % (words, chars))
+        txt     = self._active.text
+        content = txt.get("1.0", "end-1c")
+        words   = len(content.split()) if content.strip() else 0
+        chars   = len(content)
+        path    = self._active.filepath or "Untitled"
+        self._status_left.configure(text=os.path.basename(path))
+        self._status_right.configure(text="Words: %d   Chars: %d" % (words, chars))
 
     # ------------------------------------------------------------------
-    # Tab commands
+    # New tab / close tab
     # ------------------------------------------------------------------
     def cmd_new_tab(self, title="Untitled", content=""):
-        tab   = Tab(title=title)
-        color = _ACCENT_CYCLE[self._accent_idx % len(_ACCENT_CYCLE)]
-        self._accent_idx += 1
-        tab.color = color
+        tab = Tab(title=title)
+        self._tabs.append(tab)
         self._make_text_area(tab)
         if content:
             tab.text.insert("1.0", content)
-            tab.text.edit_modified(False)
-        self._tabs.append(tab)
+            tab.text.edit_reset()
         self._activate(tab)
         self._rebuild_tab_buttons()
         self._update_linenos(tab)
         return tab
-
 
     def cmd_close_tab(self, tab=None):
         if tab is None:
@@ -1581,6 +1812,8 @@ class Editor(tk.Tk):
                 "title":    tab.title.rstrip(" *"),
                 "filepath": tab.filepath,
                 "color":    tab.color,
+                "text_bg":  tab.text_bg,
+                "text_fg":  tab.text_fg,
                 "group_id": str(grp_id) if grp_id is not None else None,
                 "content":  tab.text.get("1.0", "end-1c") if tab.text else "",
             })
@@ -1617,6 +1850,8 @@ class Editor(tk.Tk):
                 tab.modified  = False
                 tab.filepath  = td.get("filepath")
                 tab.color     = td.get("color")
+                tab.text_bg   = td.get("text_bg")
+                tab.text_fg   = td.get("text_fg")
                 gid = td.get("group_id")
                 if gid and gid in groups_by_id:
                     tab.group = groups_by_id[gid]
