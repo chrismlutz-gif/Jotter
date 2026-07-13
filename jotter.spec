@@ -1,15 +1,21 @@
 # -*- mode: python ; coding: utf-8 -*-
 # PyInstaller spec for Jotter
 
+from PyInstaller.utils.hooks import collect_data_files
+
 block_cipher = None
+
+# tkinterdnd2 ships native DLLs that must be bundled
+_dnd_datas = collect_data_files('tkinterdnd2')
 
 a = Analysis(
     ['editor.py'],
     pathex=[],
     binaries=[],
-    datas=[],
+    datas=_dnd_datas,
     hiddenimports=['tkinter', 'tkinter.filedialog', 'tkinter.messagebox',
-                   'tkinter.colorchooser', 'tkinter.simpledialog', 'rtf_io'],
+                   'tkinter.colorchooser', 'tkinter.simpledialog', 'rtf_io',
+                   'tkinterdnd2'],
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],

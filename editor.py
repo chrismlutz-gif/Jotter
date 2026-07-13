@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-editor.py -- Jotter  v2.0
+editor.py -- Jotter  v2.2
   * Multiple tabs with drag-to-reorder and drag-to-group
   * Per-tab accent colour, text background, text foreground
   * RTF read/write with formatting toolbar
@@ -13,8 +13,29 @@ editor.py -- Jotter  v2.0
 import tkinter as tk
 from tkinter import filedialog, messagebox, colorchooser, simpledialog, font as tkfont
 from tkinter import ttk
-import os, sys, json
+import os, sys, json, re
 import rtf_io
+
+try:
+    from tkinterdnd2 import TkinterDnD, DND_FILES
+    _DND_AVAILABLE = True
+except ImportError:
+    _DND_AVAILABLE = False
+
+try:
+    import winreg
+    _WINREG_AVAILABLE = True
+except ImportError:
+    _WINREG_AVAILABLE = False
+
+_STARTUP_REG_KEY  = r"Software\Microsoft\Windows\CurrentVersion\Run"
+_STARTUP_REG_NAME = "Jotter"
+
+def _notes_dir():
+    """Default save/open location: ~/Documents/Notes"""
+    d = os.path.join(os.path.expanduser("~"), "Documents", "Notes")
+    os.makedirs(d, exist_ok=True)
+    return d
 
 def _data_dir():
     if getattr(sys, "frozen", False):
@@ -25,7 +46,8 @@ def _data_dir():
     os.makedirs(d, exist_ok=True)
     return d
 
-SESSION_FILE = os.path.join(_data_dir(), ".jotter_session.json")
+SESSION_FILE  = os.path.join(_data_dir(), ".jotter_session.json")
+SETTINGS_FILE = os.path.join(_data_dir(), "jotter_settings.json")
 
 THEMES = {
     "dark": {
@@ -140,7 +162,7 @@ class Tab:
         self.close_lbl  = None
 
 
-class Editor(tk.Tk):
+class Editor(TkinterDnD.Tk if _DND_AVAILABLE else tk.Tk):
 
     def __init__(self):
         super().__init__()
@@ -148,6 +170,8 @@ class Editor(tk.Tk):
         self.geometry("1100x740")
         self.minsize(320, 220)
 
+        self._default_dir   = self._load_settings().get(
+                                  "default_dir", _notes_dir())
         self._always_on_top = tk.BooleanVar(value=False)
         self._theme_name    = "dark"
         self._T             = THEMES["dark"]
@@ -186,6 +210,10 @@ class Editor(tk.Tk):
             rtf_io.tag_underline(), underline=True))
         self.protocol("WM_DELETE_WINDOW", self._on_quit)
 
+        if _DND_AVAILABLE:
+            self.drop_target_register(DND_FILES)
+            self.dnd_bind('<<Drop>>', self._on_drop)
+
         if not self._load_session():
             self.cmd_new_tab()
 
@@ -206,6 +234,8 @@ class Editor(tk.Tk):
         fm.add_separator()
         fm.add_command(label="Save          Ctrl+S", command=self.cmd_save)
         fm.add_command(label="Save As...    Ctrl+Shift+S", command=self.cmd_save_as)
+        fm.add_separator()
+        fm.add_command(label="Set Default Save Folder...", command=self._cmd_set_default_dir)
         fm.add_separator()
         fm.add_command(label="Close Tab     Ctrl+W", command=self.cmd_close_tab)
         mb.add_cascade(label="File", menu=fm)
@@ -233,6 +263,11 @@ class Editor(tk.Tk):
         om.add_checkbutton(label="Dark Mode", command=self.cmd_toggle_theme)
         om.add_checkbutton(label="Always on Top", variable=self._always_on_top,
             command=lambda: self.attributes("-topmost", self._always_on_top.get()))
+        if _WINREG_AVAILABLE:
+            self._launch_with_windows = tk.BooleanVar(value=self._startup_enabled())
+            om.add_checkbutton(label="Launch with Windows",
+                               variable=self._launch_with_windows,
+                               command=self._toggle_startup)
         mb.add_cascade(label="Options", menu=om)
 
         hm = tk.Menu(mb, **kw)
@@ -771,6 +806,78 @@ class Editor(tk.Tk):
             tab.text.configure(bg=bg, fg=fg, insertbackground=fg)
 
     # ----------------------------------------------------------------
+    # Settings
+    # ----------------------------------------------------------------
+    def _startup_enabled(self):
+        """Return True if the Jotter startup registry entry exists."""
+        try:
+            key = winreg.OpenKey(winreg.HKEY_CURRENT_USER, _STARTUP_REG_KEY)
+            winreg.QueryValueEx(key, _STARTUP_REG_NAME)
+            winreg.CloseKey(key)
+            return True
+        except Exception:
+            return False
+
+    def _toggle_startup(self):
+        """Add or remove the Windows startup registry entry."""
+        enable = self._launch_with_windows.get()
+        try:
+            key = winreg.OpenKey(winreg.HKEY_CURRENT_USER, _STARTUP_REG_KEY,
+                                 0, winreg.KEY_SET_VALUE)
+            if enable:
+                if getattr(sys, "frozen", False):
+                    target = f'"{sys.executable}"'
+                else:
+                    pythonw = os.path.join(os.path.dirname(sys.executable),
+                                           "pythonw.exe")
+                    script  = os.path.abspath(__file__)
+                    target  = f'"{pythonw}" "{script}"'
+                winreg.SetValueEx(key, _STARTUP_REG_NAME, 0,
+                                  winreg.REG_SZ, target)
+            else:
+                try:
+                    winreg.DeleteValue(key, _STARTUP_REG_NAME)
+                except FileNotFoundError:
+                    pass
+            winreg.CloseKey(key)
+        except Exception as e:
+            messagebox.showerror("Startup Error",
+                                 f"Could not update startup entry:\n{e}",
+                                 parent=self)
+            # Revert the checkbox
+            self._launch_with_windows.set(not enable)
+
+    def _load_settings(self):
+        try:
+            with open(SETTINGS_FILE, encoding="utf-8") as f:
+                return json.load(f)
+        except Exception:
+            return {}
+
+    def _save_settings(self, data):
+        try:
+            with open(SETTINGS_FILE, "w", encoding="utf-8") as f:
+                json.dump(data, f, indent=2)
+        except Exception:
+            pass
+
+    def _cmd_set_default_dir(self):
+        chosen = filedialog.askdirectory(
+            parent=self,
+            title="Choose Default Save Folder",
+            initialdir=self._default_dir)
+        if not chosen:
+            return
+        self._default_dir = os.path.normpath(chosen)
+        settings = self._load_settings()
+        settings["default_dir"] = self._default_dir
+        self._save_settings(settings)
+        messagebox.showinfo(
+            "Default Folder Set",
+            f"Default save folder is now:\n{self._default_dir}",
+            parent=self)
+
+    # ----------------------------------------------------------------
     # About
     # ----------------------------------------------------------------
     def _show_about(self):
@@ -781,9 +888,9 @@ class Editor(tk.Tk):
         win.resizable(False, False)
         win.transient(self)
         win.grab_set()
-        tk.Label(win, text="Jotter", bg=T["bg"], fg=T["text_fg"],
+        tk.Label(win, text="Jotter", bg=T["bg"], fg=T["menu_fg"],
                  font=("Segoe UI", 20, "bold"), pady=12).pack()
-        tk.Label(win, text="Version 2.0", bg=T["bg"], fg=T["text_fg"],
+        tk.Label(win, text="Version 2.2", bg=T["bg"], fg=T["menu_fg"],
                  font=("Segoe UI", 11)).pack()
         tk.Label(win, text="A lightweight rich-text editor", bg=T["bg"],
                  fg=T["close_fg"], font=("Segoe UI", 10), pady=4).pack()
@@ -791,34 +898,56 @@ class Editor(tk.Tk):
         frame = tk.Frame(win, bg=T["bg"], padx=20, pady=8)
         frame.pack(fill="x")
         features = [
+            # -- Tabs --
+            ("— Tabs —",        ""),
             ("Ctrl+N",          "New tab"),
-            ("Ctrl+O",          "Open .txt or .rtf file"),
+            ("Ctrl+W",          "Close tab"),
+            ("＋ button",        "New tab (tab bar)"),
+            ("Drag tab",        "Reorder or group tabs"),
+            ("Right-click tab", "Rename, accent color, text bg/fg, close"),
+            # -- Files --
+            ("— Files —",       ""),
+            ("Ctrl+O",          "Open file (.txt, .rtf, .md)"),
             ("Ctrl+S",          "Save"),
             ("Ctrl+Shift+S",    "Save As"),
-            ("Ctrl+W",          "Close tab"),
+            ("Drag & drop",     "Drop a file onto the window to open it"),
+            ("File > Set Default Folder", "Change the default save location"),
+            # -- Editing --
+            ("— Editing —",     ""),
+            ("Ctrl+Z / Ctrl+Y", "Undo / Redo"),
+            ("Ctrl+A",          "Select all"),
             ("Ctrl+F",          "Find"),
             ("Ctrl+H",          "Find & Replace"),
+            # -- Formatting --
+            ("— Formatting —",  ""),
             ("Ctrl+B",          "Bold"),
             ("Ctrl+I",          "Italic"),
             ("Ctrl+U",          "Underline"),
-            ("Drag tab",        "Reorder or group tabs"),
-            ("Right-click tab", "Rename, color, text background, close"),
-            ("Right-click text","Cut / Copy / Paste / Format / Case"),
-            ("Toolbar",         "Font family & size, Aa▾ case, B / I / U / S̶"),
-            ("Toolbar",         "Text & highlight color, alignment, ↵ Wrap"),
-            ("Hover controls",  "Tooltips on all toolbar controls"),
+            ("S̶  button",       "Strikethrough"),
             ("Aa▾",             "Change case: UPPER / lower / Capitalize / tOGGLE"),
-            ("S̶  button",       "Strikethrough formatting"),
             ("↵ Wrap",          "Toggle word wrap per tab"),
-            ("✕ fmt",           "Clear all formatting from selection"),
+            ("✕ fmt",           "Clear all formatting (selection or whole doc)"),
+            ("Toolbar",         "Font family & size, colors, alignment"),
+            ("Right-click text","Cut / Copy / Paste / Format / Case"),
+            # -- Options --
+            ("— Options —",     ""),
+            ("Options menu",    "Dark mode, Always on Top, Launch with Windows"),
+            ("Hover controls",  "Tooltips on all toolbar & tab controls"),
+            ("Session restore", "Reopens tabs, content, position & theme"),
         ]
         for key, desc in features:
             row = tk.Frame(frame, bg=T["bg"])
             row.pack(fill="x", pady=1)
-            tk.Label(row, text=key, bg=T["bg"], fg=T["default_dot"],
-                     font=("Consolas", 9), width=16, anchor="e").pack(side="left")
-            tk.Label(row, text="  " + desc, bg=T["bg"], fg=T["text_fg"],
-                     font=("Segoe UI", 9), anchor="w").pack(side="left")
+            if desc == "":
+                # Section header
+                tk.Label(row, text=key, bg=T["bg"], fg=T["close_fg"],
+                         font=("Segoe UI", 8, "italic"),
+                         anchor="w").pack(side="left", pady=(6, 0))
+            else:
+                tk.Label(row, text=key, bg=T["bg"], fg=T["default_dot"],
+                         font=("Consolas", 9), width=22, anchor="e").pack(side="left")
+                tk.Label(row, text="  " + desc, bg=T["bg"], fg=T["menu_fg"],
+                         font=("Segoe UI", 9), anchor="w").pack(side="left")
         tk.Frame(win, bg=T["border"], height=1).pack(fill="x", padx=20, pady=(8,0))
         mit = (
             "MIT License\n"
@@ -845,7 +974,7 @@ class Editor(tk.Tk):
                  font=("Consolas", 8), justify="left",
                  padx=20, pady=8).pack(anchor="w")
         tk.Button(win, text="Close", command=win.destroy,
-                  bg=T["tab_idle"], fg=T["text_fg"], relief="flat",
+                  bg=T["tab_idle"], fg=T["menu_fg"], relief="flat",
                   padx=20, pady=4).pack(pady=(4,14))
 
     # ----------------------------------------------------------------
@@ -861,14 +990,23 @@ class Editor(tk.Tk):
         self.title(base + (" *" if tab.modified else "") + " — Jotter")
 
     def cmd_open(self, event=None):
+        tab = self._active
+        cur_dir = (os.path.dirname(tab.filepath)
+                   if tab and tab.filepath else self._default_dir)
         path = filedialog.askopenfilename(
             parent=self,
-            filetypes=[("Text & RTF files", "*.txt *.rtf"),
+            initialdir=cur_dir,
+            filetypes=[("Text & RTF files", "*.txt *.rtf *.md"),
                        ("Text files", "*.txt"),
+                       ("Markdown files", "*.md"),
                        ("RTF files",  "*.rtf"),
                        ("All files",  "*.*")])
-        if not path:
-            return
+        if path:
+            self._open_path(path)
+
+    def _open_path(self, path):
+        """Open a file by path, reusing the active tab only if it's blank."""
+        path = os.path.normpath(path)
         tab = self._active
         if tab is None or tab.modified or tab.filepath is not None:
             tab = Tab(os.path.basename(path))
@@ -899,6 +1037,15 @@ class Editor(tk.Tk):
         tw.edit_reset()
         self._refresh_tab_label(tab)
 
+    def _on_drop(self, event):
+        """Handle files dragged onto the window."""
+        # tkinterdnd2 wraps paths with spaces in {braces}
+        paths = re.findall(r'\{([^}]+)\}|(\S+)', event.data)
+        for braced, plain in paths:
+            path = braced or plain
+            if os.path.isfile(path):
+                self._open_path(path)
+
     def cmd_save(self, event=None):
         if self._active is None:
             return
@@ -910,13 +1057,16 @@ class Editor(tk.Tk):
     def cmd_save_as(self, event=None):
         if self._active is None:
             return
-        is_rtf = (self._active.filepath or "").lower().endswith(".rtf")
-        default_ext = ".rtf" if is_rtf else ".txt"
+        ext = os.path.splitext(self._active.filepath or "")[1].lower()
+        default_ext = ext if ext in (".rtf", ".md", ".txt") else ".txt"
         path = filedialog.asksaveasfilename(
             parent=self,
             defaultextension=default_ext,
+            initialdir=(os.path.dirname(self._active.filepath)
+                        if self._active.filepath else self._default_dir),
             filetypes=[("RTF files", "*.rtf"),
                        ("Text files", "*.txt"),
+                       ("Markdown files", "*.md"),
                        ("All files",  "*.*")],
             initialfile=self._active.title.rstrip(" *") or "Untitled")
         if not path:
@@ -1518,6 +1668,9 @@ class Editor(tk.Tk):
         tw.bind("<KeyRelease>",    lambda e, t=tab: self._refresh_status())
         tw.bind("<ButtonRelease>", lambda e, t=tab: self._refresh_status())
         tw.bind("<Button-3>",      lambda e, t=tab: self._text_context(e, t))
+        if _DND_AVAILABLE:
+            tw.drop_target_register(DND_FILES)
+            tw.dnd_bind('<<Drop>>', self._on_drop)
         self._apply_text_colors(tab)
 
     def _on_modified(self, tab):
@@ -1646,8 +1799,12 @@ class Editor(tk.Tk):
                 "active":   tab is self._active,
                 "content":  tab.text.get("1.0", "end-1c") if tab.text else "",
             })
+        # Save window geometry (but not if minimised — state is 'iconic')
+        geom = None
+        if self.state() == "normal":
+            geom = self.geometry()
         data = {"tabs": tab_list, "groups": groups,
-                "theme": self._theme_name}
+                "theme": self._theme_name, "geometry": geom}
         try:
             with open(SESSION_FILE, "w", encoding="utf-8") as f:
                 json.dump(data, f, indent=2)
@@ -1662,6 +1819,13 @@ class Editor(tk.Tk):
                 data = json.load(f)
         except Exception:
             return False
+
+        geom = data.get("geometry")
+        if geom:
+            try:
+                self.geometry(geom)
+            except Exception:
+                pass
 
         theme = data.get("theme", "dark")
         if theme in THEMES:
