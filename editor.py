@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-editor.py -- Jotter  v2.2
+editor.py -- Jotter  v2.3
   * Multiple tabs with drag-to-reorder and drag-to-group
   * Per-tab accent colour, text background, text foreground
   * RTF read/write with formatting toolbar
@@ -155,6 +155,7 @@ class Tab:
         self.text_frame = None
         self.text       = None
         self.linenos    = None
+        self.hscroll    = None
         self.btn_frame  = None
         self.dot_canvas = None
         self.oval_id    = None
@@ -175,6 +176,7 @@ class Editor(TkinterDnD.Tk if _DND_AVAILABLE else tk.Tk):
         self._always_on_top = tk.BooleanVar(value=False)
         self._theme_name    = "dark"
         self._T             = THEMES["dark"]
+        self._configure_scrollbar_style()
         self._tabs          = []
         self._active        = None
         self._drag_tab      = None
@@ -216,6 +218,56 @@ class Editor(TkinterDnD.Tk if _DND_AVAILABLE else tk.Tk):
 
         if not self._load_session():
             self.cmd_new_tab()
+
+    # ----------------------------------------------------------------
+    # Scrollbar style
+    # ----------------------------------------------------------------
+    def _configure_scrollbar_style(self):
+        """Create a pure-Tk (non-native) scrollbar style so width is respected."""
+        T = self._T
+        s = ttk.Style()
+        _SB_W = 20
+        # Borrow elements from the 'clam' theme — it renders in pure Tk, not
+        # via the Windows visual-styles engine, so width/colours are honoured.
+        for elem in (
+            'Vertical.Scrollbar.trough',   'Vertical.Scrollbar.thumb',
+            'Vertical.Scrollbar.uparrow',  'Vertical.Scrollbar.downarrow',
+            'Horizontal.Scrollbar.trough', 'Horizontal.Scrollbar.thumb',
+            'Horizontal.Scrollbar.leftarrow', 'Horizontal.Scrollbar.rightarrow',
+        ):
+            try:
+                s.element_create(f'Jotter.{elem}', 'from', 'clam')
+            except tk.TclError:
+                pass   # already exists from a previous call
+
+        s.layout('Jotter.Vertical.TScrollbar', [
+            ('Jotter.Vertical.Scrollbar.trough', {'sticky': 'ns', 'children': [
+                ('Jotter.Vertical.Scrollbar.uparrow',  {'side': 'top',    'sticky': ''}),
+                ('Jotter.Vertical.Scrollbar.downarrow', {'side': 'bottom', 'sticky': ''}),
+                ('Jotter.Vertical.Scrollbar.thumb',    {'expand': '1',    'sticky': 'nswe'}),
+            ]}),
+        ])
+        s.layout('Jotter.Horizontal.TScrollbar', [
+            ('Jotter.Horizontal.Scrollbar.trough', {'sticky': 'ew', 'children': [
+                ('Jotter.Horizontal.Scrollbar.leftarrow',  {'side': 'left',  'sticky': ''}),
+                ('Jotter.Horizontal.Scrollbar.rightarrow', {'side': 'right', 'sticky': ''}),
+                ('Jotter.Horizontal.Scrollbar.thumb',      {'expand': '1',   'sticky': 'nswe'}),
+            ]}),
+        ])
+        for name in ('Jotter.Vertical.TScrollbar', 'Jotter.Horizontal.TScrollbar'):
+            s.configure(name,
+                background=T['tab_bar'],
+                troughcolor=T['bg'],
+                bordercolor=T['bg'],
+                darkcolor=T['tab_bar'],
+                lightcolor=T['tab_bar'],
+                arrowcolor=T['menu_fg'],
+                width=_SB_W,
+                arrowsize=_SB_W)
+            s.map(name, background=[
+                ('active', T['tab_hover']),
+                ('!active', T['tab_bar']),
+            ])
 
     # ----------------------------------------------------------------
     # Menu
@@ -437,6 +489,11 @@ class Editor(TkinterDnD.Tk if _DND_AVAILABLE else tk.Tk):
         if hasattr(self, "_wrap_on") and tab.text:
             is_wrapped = tab.text.cget("wrap") != "none"
             self._wrap_on.set(is_wrapped)
+            if tab.hscroll:
+                if is_wrapped:
+                    tab.hscroll.pack_forget()
+                else:
+                    tab.hscroll.pack(side="bottom", fill="x")
 
     # ----------------------------------------------------------------
     # Ghost drag
@@ -890,7 +947,7 @@ class Editor(TkinterDnD.Tk if _DND_AVAILABLE else tk.Tk):
         win.grab_set()
         tk.Label(win, text="Jotter", bg=T["bg"], fg=T["menu_fg"],
                  font=("Segoe UI", 20, "bold"), pady=12).pack()
-        tk.Label(win, text="Version 2.2", bg=T["bg"], fg=T["menu_fg"],
+        tk.Label(win, text="Version 2.3", bg=T["bg"], fg=T["menu_fg"],
                  font=("Segoe UI", 11)).pack()
         tk.Label(win, text="A lightweight rich-text editor", bg=T["bg"],
                  fg=T["close_fg"], font=("Segoe UI", 10), pady=4).pack()
@@ -1235,7 +1292,13 @@ class Editor(TkinterDnD.Tk if _DND_AVAILABLE else tk.Tk):
     def _toggle_wrap(self):
         tab = self._active
         if tab and tab.text:
-            tab.text.configure(wrap="word" if self._wrap_on.get() else "none")
+            wrap_on = self._wrap_on.get()
+            tab.text.configure(wrap="word" if wrap_on else "none")
+            if tab.hscroll:
+                if wrap_on:
+                    tab.hscroll.pack_forget()
+                else:
+                    tab.hscroll.pack(side="bottom", fill="x")
 
     def _fmt_toggle(self, tag_name, **tag_kw):
         tab = self._active
@@ -1642,14 +1705,18 @@ class Editor(TkinterDnD.Tk if _DND_AVAILABLE else tk.Tk):
         frame = tk.Frame(self._body_frame, bg=T["bg"])
         tab.text_frame = frame
 
-        ln = tk.Text(frame, width=4, padx=4, bg=T["ln_bg"], fg=T["ln_fg"],
+        # Inner row: line numbers + text widget + vertical scrollbar
+        inner = tk.Frame(frame, bg=T["bg"])
+        inner.pack(side="top", fill="both", expand=True)
+
+        ln = tk.Text(inner, width=4, padx=4, bg=T["ln_bg"], fg=T["ln_fg"],
                      relief="flat", state="disabled", cursor="arrow",
                      font=("Consolas", 11), spacing1=2,
                      takefocus=False, wrap="none")
         ln.pack(side="left", fill="y")
         tab.linenos = ln
 
-        tw = tk.Text(frame, undo=True, wrap="word",
+        tw = tk.Text(inner, undo=True, wrap="word",
                      bg=T["text_bg"], fg=T["text_fg"],
                      insertbackground=T["text_fg"],
                      selectbackground=T["text_sel"],
@@ -1658,12 +1725,20 @@ class Editor(TkinterDnD.Tk if _DND_AVAILABLE else tk.Tk):
         tw.pack(side="left", fill="both", expand=True)
         tab.text = tw
 
-        sb = tk.Scrollbar(frame, command=tw.yview,
-                          bg=T["tab_bar"], troughcolor=T["bg"],
-                          relief="flat", width=10)
-        sb.pack(side="right", fill="y")
-        tw.configure(yscrollcommand=lambda f, l: (sb.set(f, l),
-                                                   self._update_linenos(tab)))
+        sb_v = ttk.Scrollbar(inner, orient="vertical", command=tw.yview,
+                             style="Jotter.Vertical.TScrollbar")
+        sb_v.pack(side="right", fill="y")
+
+        # Horizontal scrollbar — shown only when word wrap is off
+        sb_h = ttk.Scrollbar(frame, orient="horizontal", command=tw.xview,
+                             style="Jotter.Horizontal.TScrollbar")
+        tab.hscroll = sb_h
+        # Not packed yet; shown when wrap is toggled off
+
+        tw.configure(
+            yscrollcommand=lambda f, l: (sb_v.set(f, l), self._update_linenos(tab)),
+            xscrollcommand=sb_h.set
+        )
         tw.bind("<<Modified>>",    lambda e, t=tab: self._on_modified(t))
         tw.bind("<KeyRelease>",    lambda e, t=tab: self._refresh_status())
         tw.bind("<ButtonRelease>", lambda e, t=tab: self._refresh_status())
@@ -1690,6 +1765,8 @@ class Editor(TkinterDnD.Tk if _DND_AVAILABLE else tk.Tk):
         count = int(tw.index("end-1c").split(".")[0])
         ln.insert("1.0", "\n".join(str(i) for i in range(1, count + 1)))
         ln.configure(state="disabled")
+        # Sync scroll position with the main text widget
+        ln.yview_moveto(tw.yview()[0])
 
     # ----------------------------------------------------------------
     # Status bar
