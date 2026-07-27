@@ -3,7 +3,7 @@
 A lightweight, tabbed rich-text editor built for speed and organisation — dark mode included.
 
 ![Python](https://img.shields.io/badge/Python-3.9%2B-blue)
-![Version](https://img.shields.io/badge/Version-2.2-orange)
+![Version](https://img.shields.io/badge/Version-2.4-orange)
 ![License](https://img.shields.io/badge/License-MIT-green)
 ![Platform](https://img.shields.io/badge/Platform-Windows-lightgrey)
 

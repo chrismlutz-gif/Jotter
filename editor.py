@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-editor.py -- Jotter  v2.3
+editor.py -- Jotter  v2.4
   * Multiple tabs with drag-to-reorder and drag-to-group
   * Per-tab accent colour, text background, text foreground
   * RTF read/write with formatting toolbar
@@ -179,6 +179,10 @@ class Editor(TkinterDnD.Tk if _DND_AVAILABLE else tk.Tk):
         self._configure_scrollbar_style()
         self._tabs          = []
         self._active        = None
+        # Tags to apply to each newly typed character (typing-format mode).
+        # Keys are tag names; values are the tag_configure kwargs for that tag.
+        self._typing_tags   = {}
+        self._pre_key_pos   = None   # cursor position before last KeyPress
         self._drag_tab      = None
         self._drag_start_x  = 0
         self._drag_moved    = False
@@ -947,7 +951,7 @@ class Editor(TkinterDnD.Tk if _DND_AVAILABLE else tk.Tk):
         win.grab_set()
         tk.Label(win, text="Jotter", bg=T["bg"], fg=T["menu_fg"],
                  font=("Segoe UI", 20, "bold"), pady=12).pack()
-        tk.Label(win, text="Version 2.3", bg=T["bg"], fg=T["menu_fg"],
+        tk.Label(win, text="Version 2.4", bg=T["bg"], fg=T["menu_fg"],
                  font=("Segoe UI", 11)).pack()
         tk.Label(win, text="A lightweight rich-text editor", bg=T["bg"],
                  fg=T["close_fg"], font=("Segoe UI", 10), pady=4).pack()
@@ -1193,9 +1197,26 @@ class Editor(TkinterDnD.Tk if _DND_AVAILABLE else tk.Tk):
                                              int(self._size_var.get())))
         ToolTip(sc, "Font size (pt)\nApplied to selected text")
 
-        btn_kw = dict(bg=T["tab_idle"], fg=T["toolbar_fg"],
-                      relief="flat", padx=6, pady=2,
-                      cursor="hand2")
+        # ------------------------------------------------------------------
+        # On Windows, tk.Button (Win32 BUTTON control) receives WM_SETFOCUS
+        # on click, which clears the text widget's sel tag before any Python
+        # code can run.  tk.Label (Win32 STATIC control) never accepts focus
+        # on click, so the text widget keeps focus and sel is preserved.
+        # All formatting buttons are therefore Labels with click/hover bindings.
+        # ------------------------------------------------------------------
+        _bg      = T["tab_idle"]
+        _fg      = T["toolbar_fg"]
+        _hov     = T["tab_hover"]
+
+        def _fmt_lbl(parent, text, font, cmd, padx=6, **kw):
+            """Label-based button that never steals focus from the text widget."""
+            lbl = tk.Label(parent, text=text, font=font,
+                           bg=_bg, fg=_fg, cursor="hand2",
+                           relief="flat", padx=padx, pady=2, **kw)
+            lbl.bind("<Button-1>", lambda e: cmd())
+            lbl.bind("<Enter>",    lambda e: lbl.configure(bg=_hov))
+            lbl.bind("<Leave>",    lambda e: lbl.configure(bg=_bg))
+            return lbl
 
         def _show_case_menu(event=None):
             T2 = self._T
@@ -1213,38 +1234,34 @@ class Editor(TkinterDnD.Tk if _DND_AVAILABLE else tk.Tk):
             finally:
                 m.grab_release()
 
-        case_btn = tk.Button(bar, text="Aa▾", font=("Segoe UI", 10), **btn_kw,
-            command=_show_case_menu)
+        case_btn = _fmt_lbl(bar, "Aa▾", ("Segoe UI", 10), _show_case_menu, padx=6)
         case_btn.pack(side="left", padx=(4,6))
         ToolTip(case_btn, "Change case\nUPPER / lower / Capitalize / tOGGLE")
 
-        b_btn = tk.Button(bar, text="B", font=("Segoe UI", 10, "bold"), **btn_kw,
-            command=lambda: self._fmt_toggle(rtf_io.tag_bold(),
-                font=("Consolas", 11, "bold")))
+        b_btn = _fmt_lbl(bar, "B", ("Segoe UI", 10, "bold"),
+            lambda: self._fmt_toggle(rtf_io.tag_bold(), font=("Consolas", 11, "bold")))
         b_btn.pack(side="left", padx=1)
         ToolTip(b_btn, "Bold (Ctrl+B)")
 
-        i_btn = tk.Button(bar, text="I", font=("Segoe UI", 10, "italic"), **btn_kw,
-            command=lambda: self._fmt_toggle(rtf_io.tag_italic(),
-                font=("Consolas", 11, "italic")))
+        i_btn = _fmt_lbl(bar, "I", ("Segoe UI", 10, "italic"),
+            lambda: self._fmt_toggle(rtf_io.tag_italic(), font=("Consolas", 11, "italic")))
         i_btn.pack(side="left", padx=1)
         ToolTip(i_btn, "Italic (Ctrl+I)")
 
-        u_btn = tk.Button(bar, text="U", font=("Segoe UI", 10), **btn_kw,
-            command=lambda: self._fmt_toggle(rtf_io.tag_underline(),
-                underline=True))
+        u_btn = _fmt_lbl(bar, "U", ("Segoe UI", 10),
+            lambda: self._fmt_toggle(rtf_io.tag_underline(), underline=True))
         u_btn.pack(side="left", padx=1)
         ToolTip(u_btn, "Underline (Ctrl+U)")
 
-        s_btn = tk.Button(bar, text="S̶", font=("Segoe UI", 10), **btn_kw,
-            command=lambda: self._fmt_toggle(rtf_io.tag_strikethrough(),
-                overstrike=True))
+        s_btn = _fmt_lbl(bar, "S̶", ("Segoe UI", 10),
+            lambda: self._fmt_toggle(rtf_io.tag_strikethrough(), overstrike=True))
         s_btn.pack(side="left", padx=1)
         ToolTip(s_btn, "Strikethrough")
 
         self._fg_swatch = tk.Canvas(bar, width=22, height=22,
             bg=T["tab_idle"], highlightthickness=1,
-            highlightbackground=T["border"], cursor="hand2")
+            highlightbackground=T["border"], cursor="hand2",
+            takefocus=False)
         self._fg_swatch.pack(side="left", padx=(6,1))
         self._fg_rect = self._fg_swatch.create_rectangle(3,3,19,19,
             fill="#ff0000", outline="")
@@ -1255,7 +1272,8 @@ class Editor(TkinterDnD.Tk if _DND_AVAILABLE else tk.Tk):
 
         self._bg_swatch = tk.Canvas(bar, width=22, height=22,
             bg=T["tab_idle"], highlightthickness=1,
-            highlightbackground=T["border"], cursor="hand2")
+            highlightbackground=T["border"], cursor="hand2",
+            takefocus=False)
         self._bg_swatch.pack(side="left", padx=(6,1))
         self._bg_rect = self._bg_swatch.create_rectangle(3,3,19,19,
             fill="#ffff00", outline="")
@@ -1267,8 +1285,8 @@ class Editor(TkinterDnD.Tk if _DND_AVAILABLE else tk.Tk):
         tk.Label(bar, text=" ", bg=T["tab_bar"]).pack(side="left", padx=4)
         align_tips = {"left": "Align left", "center": "Align center", "right": "Align right"}
         for sym, align in [("≡L","left"),("≡C","center"),("≡R","right")]:
-            ab = tk.Button(bar, text=sym, font=("Segoe UI", 10), **btn_kw,
-                command=lambda a=align: self._fmt_set_align(a))
+            ab = _fmt_lbl(bar, sym, ("Segoe UI", 10),
+                lambda a=align: self._fmt_set_align(a))
             ab.pack(side="left", padx=1)
             ToolTip(ab, align_tips[align])
 
@@ -1284,8 +1302,7 @@ class Editor(TkinterDnD.Tk if _DND_AVAILABLE else tk.Tk):
         ToolTip(wrap_btn, "Toggle word wrap\nfor the active tab")
         self._wrap_btn = wrap_btn
 
-        clr_btn = tk.Button(bar, text="✕ fmt", font=("Segoe UI", 10), **btn_kw,
-            command=self._fmt_clear)
+        clr_btn = _fmt_lbl(bar, "✕ fmt", ("Segoe UI", 10), self._fmt_clear, padx=6)
         clr_btn.pack(side="left", padx=(8,1))
         ToolTip(clr_btn, "Clear all formatting\nfrom selected text")
 
@@ -1300,22 +1317,86 @@ class Editor(TkinterDnD.Tk if _DND_AVAILABLE else tk.Tk):
                 else:
                     tab.hscroll.pack(side="bottom", fill="x")
 
+    def _cache_selection(self, tab):
+        """Save the current selection into both a Python attr and a persistent
+        Tk tag ('user_sel').  The Tk tag is part of the document model and
+        survives WM_SETFOCUS / focus changes completely unchanged."""
+        tw = tab.text
+        if tw is None:
+            return
+        try:
+            s = tw.index("sel.first")
+            e = tw.index("sel.last")
+            tab._sel_cache = (s, e)
+            tw.tag_remove("user_sel", "1.0", "end")
+            tw.tag_add("user_sel", s, e)
+        except tk.TclError:
+            pass  # no live selection — keep existing user_sel / cache
+
+    def _clear_cached_sel(self, tab):
+        """Explicitly clear the Python cache and the user_sel tag.
+        Also clears typing-format mode — clicking to reposition the cursor
+        signals the user is done with the formatted run."""
+        tab._sel_cache = None
+        self._typing_tags.clear()
+        if tab.text:
+            tab.text.tag_remove("user_sel", "1.0", "end")
+
+    def _on_key_release(self, tab):
+        """Called on every KeyRelease in the text widget.
+        If a selection exists, update user_sel tag + cache.
+        If no selection (e.g. user pressed an arrow key to move cursor),
+        clear user_sel + cache so stale selections don't persist."""
+        tw = tab.text
+        if tw is None:
+            return
+        try:
+            s = tw.index("sel.first")
+            e = tw.index("sel.last")
+            tab._sel_cache = (s, e)
+            tw.tag_remove("user_sel", "1.0", "end")
+            tw.tag_add("user_sel", s, e)
+        except tk.TclError:
+            # Cursor moved without selection — clear stale user_sel
+            tab._sel_cache = None
+            tw.tag_remove("user_sel", "1.0", "end")
+        self._refresh_status()
+
+    def _get_sel(self, tab):
+        """Return (start, end) or None.
+        Priority: live sel tag → user_sel persistent tag → Python tuple cache."""
+        tw = tab.text
+        # 1. Live sel tag (works when focus is in the text widget)
+        try:
+            return tw.index("sel.first"), tw.index("sel.last")
+        except tk.TclError:
+            pass
+        # 2. user_sel tag — a document-model tag that survives focus changes
+        ranges = tw.tag_ranges("user_sel")
+        if len(ranges) >= 2:
+            return str(ranges[0]), str(ranges[1])
+        # 3. Python tuple fallback
+        return getattr(tab, "_sel_cache", None)
+
     def _fmt_toggle(self, tag_name, **tag_kw):
         tab = self._active
         if tab is None or tab.text is None:
             return
         tw = tab.text
-        try:
-            sel_start = tw.index("sel.first")
-            sel_end   = tw.index("sel.last")
-        except tk.TclError:
+        sel = self._get_sel(tab)
+        if not sel:
+            # No selection — toggle typing-format mode for subsequent keystrokes
+            if tag_name in self._typing_tags:
+                del self._typing_tags[tag_name]
+            else:
+                self._typing_tags[tag_name] = tag_kw
+                tw.tag_configure(tag_name, **tag_kw)
             return
-        existing = tw.tag_ranges(tag_name)
-        has_tag  = False
+        sel_start, sel_end = sel
+        has_tag = False
         idx = sel_start
         while tw.compare(idx, "<", sel_end):
-            tags_here = tw.tag_names(idx)
-            if tag_name in tags_here:
+            if tag_name in tw.tag_names(idx):
                 has_tag = True
                 break
             idx = tw.index("%s +1c" % idx)
@@ -1324,6 +1405,28 @@ class Editor(TkinterDnD.Tk if _DND_AVAILABLE else tk.Tk):
         else:
             tw.tag_add(tag_name, sel_start, sel_end)
             tw.tag_configure(tag_name, **tag_kw)
+
+    def _typing_fmt_keypress(self, tab):
+        """Record cursor position just before a key is processed."""
+        if self._typing_tags and tab.text:
+            self._pre_key_pos = tab.text.index("insert")
+
+    def _typing_fmt_afteridle(self, tab):
+        """After the key is processed, apply typing-format tags to any newly
+        inserted characters (detected by cursor advancing past _pre_key_pos)."""
+        if not self._typing_tags or self._pre_key_pos is None:
+            return
+        tw = tab.text
+        if tw is None:
+            return
+        try:
+            new_pos = tw.index("insert")
+            if tw.compare(new_pos, ">", self._pre_key_pos):
+                for tag_name, tag_kw in self._typing_tags.items():
+                    tw.tag_add(tag_name, self._pre_key_pos, new_pos)
+        except tk.TclError:
+            pass
+        self._pre_key_pos = None
 
     def _fmt_apply(self, tag_name, sel_start, sel_end, **tag_kw):
         tab = self._active
@@ -1338,11 +1441,10 @@ class Editor(TkinterDnD.Tk if _DND_AVAILABLE else tk.Tk):
         if tab is None or tab.text is None:
             return
         tw = tab.text
-        try:
-            sel_start = tw.index("sel.first")
-            sel_end   = tw.index("sel.last")
-        except tk.TclError:
+        sel = self._get_sel(tab)
+        if not sel:
             return
+        sel_start, sel_end = sel
         fn_tag = rtf_io.tag_font(family)
         sz_tag = rtf_io.tag_size(size)
         tw.tag_add(fn_tag, sel_start, sel_end)
@@ -1352,53 +1454,62 @@ class Editor(TkinterDnD.Tk if _DND_AVAILABLE else tk.Tk):
 
     def _fmt_pick_fg(self):
         current = self._fg_swatch.itemcget(self._fg_rect, "fill") or "#ff0000"
+        tab = self._active
+        if tab is None or tab.text is None:
+            return
+        sel = self._get_sel(tab)
         r = colorchooser.askcolor(color=current, parent=self, title="Text Color")
         if not (r and r[1]):
             return
         color = r[1]
         self._fg_swatch.itemconfig(self._fg_rect, fill=color)
-        tab = self._active
-        if tab is None or tab.text is None:
-            return
-        tw = tab.text
-        try:
-            sel_start = tw.index("sel.first")
-            sel_end   = tw.index("sel.last")
-        except tk.TclError:
-            return
         tag = rtf_io.tag_fg(color)
-        tw.tag_add(tag, sel_start, sel_end)
-        tw.tag_configure(tag, foreground=color)
+        if sel:
+            sel_start, sel_end = sel
+            tab.text.tag_add(tag, sel_start, sel_end)
+            tab.text.tag_configure(tag, foreground=color)
+        else:
+            # No selection — activate typing-color mode
+            # Remove any previous fg typing tag first
+            for k in list(self._typing_tags):
+                if k.startswith("fmt_fg_"):
+                    del self._typing_tags[k]
+            self._typing_tags[tag] = {"foreground": color}
+            tab.text.tag_configure(tag, foreground=color)
 
     def _fmt_pick_bg(self):
         current = self._bg_swatch.itemcget(self._bg_rect, "fill") or "#ffff00"
+        tab = self._active
+        if tab is None or tab.text is None:
+            return
+        sel = self._get_sel(tab)
         r = colorchooser.askcolor(color=current, parent=self, title="Highlight Color")
         if not (r and r[1]):
             return
         color = r[1]
         self._bg_swatch.itemconfig(self._bg_rect, fill=color)
-        tab = self._active
-        if tab is None or tab.text is None:
-            return
-        tw = tab.text
-        try:
-            sel_start = tw.index("sel.first")
-            sel_end   = tw.index("sel.last")
-        except tk.TclError:
-            return
         tag = rtf_io.tag_bg(color)
-        tw.tag_add(tag, sel_start, sel_end)
-        tw.tag_configure(tag, background=color)
+        if sel:
+            sel_start, sel_end = sel
+            tab.text.tag_add(tag, sel_start, sel_end)
+            tab.text.tag_configure(tag, background=color)
+        else:
+            # No selection — activate typing-highlight mode
+            for k in list(self._typing_tags):
+                if k.startswith("fmt_bg_"):
+                    del self._typing_tags[k]
+            self._typing_tags[tag] = {"background": color}
+            tab.text.tag_configure(tag, background=color)
 
     def _fmt_set_align(self, align):
         tab = self._active
         if tab is None or tab.text is None:
             return
         tw = tab.text
-        try:
-            sel_start = tw.index("sel.first")
-            sel_end   = tw.index("sel.last")
-        except tk.TclError:
+        sel = self._get_sel(tab)
+        if sel:
+            sel_start, sel_end = sel
+        else:
             ins = tw.index("insert")
             sel_start = tw.index("%s linestart" % ins)
             sel_end   = tw.index("%s lineend"   % ins)
@@ -1413,10 +1524,10 @@ class Editor(TkinterDnD.Tk if _DND_AVAILABLE else tk.Tk):
         if tab is None or tab.text is None:
             return
         tw = tab.text
-        try:
-            sel_start = tw.index("sel.first")
-            sel_end   = tw.index("sel.last")
-        except tk.TclError:
+        sel = self._get_sel(tab)
+        if sel:
+            sel_start, sel_end = sel
+        else:
             sel_start, sel_end = "1.0", "end"
         for tag in tw.tag_names():
             if tag.startswith("fmt_"):
@@ -1427,11 +1538,10 @@ class Editor(TkinterDnD.Tk if _DND_AVAILABLE else tk.Tk):
         if tab is None or tab.text is None:
             return
         tw = tab.text
-        try:
-            sel_start = tw.index("sel.first")
-            sel_end   = tw.index("sel.last")
-        except tk.TclError:
+        sel = self._get_sel(tab)
+        if not sel:
             return
+        sel_start, sel_end = sel
         text = tw.get(sel_start, sel_end)
         if mode == "upper":
             new = text.upper()
@@ -1721,7 +1831,8 @@ class Editor(TkinterDnD.Tk if _DND_AVAILABLE else tk.Tk):
                      insertbackground=T["text_fg"],
                      selectbackground=T["text_sel"],
                      relief="flat", bd=8,
-                     font=("Consolas", 11), spacing1=2)
+                     font=("Consolas", 11), spacing1=2,
+                     exportselection=False)
         tw.pack(side="left", fill="both", expand=True)
         tab.text = tw
 
@@ -1739,10 +1850,31 @@ class Editor(TkinterDnD.Tk if _DND_AVAILABLE else tk.Tk):
             yscrollcommand=lambda f, l: (sb_v.set(f, l), self._update_linenos(tab)),
             xscrollcommand=sb_h.set
         )
-        tw.bind("<<Modified>>",    lambda e, t=tab: self._on_modified(t))
-        tw.bind("<KeyRelease>",    lambda e, t=tab: self._refresh_status())
-        tw.bind("<ButtonRelease>", lambda e, t=tab: self._refresh_status())
-        tw.bind("<Button-3>",      lambda e, t=tab: self._text_context(e, t))
+        # 'user_sel' is our persistent selection tag — lives in the document model,
+        # completely immune to focus changes / WM_SETFOCUS clearing the sel tag.
+        # Keep it invisible (no visual config) so it doesn't affect rendering.
+        tw.tag_configure("user_sel")   # invisible marker tag
+
+        tw.bind("<<Modified>>",      lambda e, t=tab: self._on_modified(t))
+        # Update user_sel + cache whenever the selection changes:
+        #   <ButtonPress-1>   — clear both (user repositioning cursor, no selection yet)
+        #   <B1-Motion>       — update during drag
+        #   <ButtonRelease-1> — update at end of drag / click
+        #   <KeyRelease>      — update after Shift+Arrow / Ctrl+A etc.
+        #                       also clears both if no selection exists after key
+        tw.bind("<ButtonPress-1>",   lambda e, t=tab: self._clear_cached_sel(t), add="+")
+        tw.bind("<B1-Motion>",       lambda e, t=tab: self._cache_selection(t), add="+")
+        tw.bind("<ButtonRelease-1>", lambda e, t=tab: self._cache_selection(t), add="+")
+        tw.bind("<KeyRelease>",      lambda e, t=tab: self._on_key_release(t))
+        tw.bind("<ButtonRelease>",   lambda e, t=tab: self._refresh_status())
+        # Typing-format mode: record position before key, apply active tags after
+        tw.bind("<KeyPress>",
+                lambda e, t=tab: (
+                    self._typing_fmt_keypress(t),
+                    self.after_idle(lambda: self._typing_fmt_afteridle(t))
+                ), add="+")
+        tw.bind("<Button-3>",        lambda e, t=tab: self._text_context(e, t))
+        tw.bind("<FocusOut>",        lambda e, t=tab: self._cache_selection(t))  # belt-and-suspenders
         if _DND_AVAILABLE:
             tw.drop_target_register(DND_FILES)
             tw.dnd_bind('<<Drop>>', self._on_drop)
