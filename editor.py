@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-editor.py -- Jotter  v2.4
+editor.py -- Jotter  v2.6
   * Multiple tabs with drag-to-reorder and drag-to-group
   * Per-tab accent colour, text background, text foreground
   * RTF read/write with formatting toolbar
@@ -13,7 +13,7 @@ editor.py -- Jotter  v2.4
 import tkinter as tk
 from tkinter import filedialog, messagebox, colorchooser, simpledialog, font as tkfont
 from tkinter import ttk
-import os, sys, json, re
+import os, sys, json, re, subprocess
 import rtf_io
 
 try:
@@ -36,6 +36,25 @@ def _notes_dir():
     d = os.path.join(os.path.expanduser("~"), "Documents", "Notes")
     os.makedirs(d, exist_ok=True)
     return d
+
+_INVALID_FS_CHARS = re.compile(r'[\\/:*?"<>|]')
+
+def _sanitize_filename(name):
+    """Strip characters that are illegal in Windows/Mac/Linux filenames."""
+    name = _INVALID_FS_CHARS.sub("", name).strip().rstrip(".")
+    return name or "Untitled"
+
+def _unique_path(path):
+    """Return path, or path with ' (2)', ' (3)', ... appended if it already exists."""
+    if not os.path.exists(path):
+        return path
+    root, ext = os.path.splitext(path)
+    n = 2
+    while True:
+        candidate = "%s (%d)%s" % (root, n, ext)
+        if not os.path.exists(candidate):
+            return candidate
+        n += 1
 
 def _data_dir():
     if getattr(sys, "frozen", False):
@@ -148,6 +167,7 @@ class Tab:
         self.title      = title
         self.filepath   = None
         self.modified   = False
+        self.named      = False   # True once the user has explicitly renamed this tab
         self.color      = None
         self.text_bg    = None
         self.text_fg    = None
@@ -363,6 +383,16 @@ class Editor(TkinterDnD.Tk if _DND_AVAILABLE else tk.Tk):
         plus.bind("<Enter>", lambda e: plus.configure(bg=T["tab_hover"]))
         plus.bind("<Leave>", lambda e: plus.configure(bg=T["tab_idle"]))
         ToolTip(plus, "New tab  (Ctrl+N)")
+
+        # "open save folder" button, pinned just left of the "+" button
+        folder = tk.Label(outer, text=" 📁 ", bg=T["tab_idle"], fg=T["toolbar_fg"],
+                          font=("Segoe UI", 11), cursor="hand2",
+                          relief="flat", padx=2, pady=3)
+        folder.pack(side="right", padx=(0, 0), pady=3)
+        folder.bind("<Button-1>", lambda e: self.cmd_open_save_folder())
+        folder.bind("<Enter>", lambda e: folder.configure(bg=T["tab_hover"]))
+        folder.bind("<Leave>", lambda e: folder.configure(bg=T["tab_idle"]))
+        ToolTip(folder, "Open default save folder")
 
     def _rebuild_tab_buttons(self):
         T = self._T
@@ -803,6 +833,7 @@ class Editor(TkinterDnD.Tk if _DND_AVAILABLE else tk.Tk):
             initialvalue=tab.title.rstrip(" *"), parent=self)
         if name and name.strip():
             tab.title = name.strip()
+            tab.named = True
             if tab.title_lbl:
                 tab.title_lbl.configure(text=tab.title)
 
@@ -922,6 +953,20 @@ class Editor(TkinterDnD.Tk if _DND_AVAILABLE else tk.Tk):
         except Exception:
             pass
 
+    def cmd_open_save_folder(self, event=None):
+        """Open the default save folder (from settings JSON) in the OS file browser."""
+        path = self._default_dir
+        try:
+            os.makedirs(path, exist_ok=True)
+            if sys.platform.startswith("win"):
+                os.startfile(path)
+            elif sys.platform == "darwin":
+                subprocess.Popen(["open", path])
+            else:
+                subprocess.Popen(["xdg-open", path])
+        except Exception as e:
+            messagebox.showerror("Open Folder Error", str(e), parent=self)
+
     def _cmd_set_default_dir(self):
         chosen = filedialog.askdirectory(
             parent=self,
@@ -951,7 +996,7 @@ class Editor(TkinterDnD.Tk if _DND_AVAILABLE else tk.Tk):
         win.grab_set()
         tk.Label(win, text="Jotter", bg=T["bg"], fg=T["menu_fg"],
                  font=("Segoe UI", 20, "bold"), pady=12).pack()
-        tk.Label(win, text="Version 2.4", bg=T["bg"], fg=T["menu_fg"],
+        tk.Label(win, text="Version 2.6", bg=T["bg"], fg=T["menu_fg"],
                  font=("Segoe UI", 11)).pack()
         tk.Label(win, text="A lightweight rich-text editor", bg=T["bg"],
                  fg=T["close_fg"], font=("Segoe UI", 10), pady=4).pack()
@@ -972,6 +1017,9 @@ class Editor(TkinterDnD.Tk if _DND_AVAILABLE else tk.Tk):
             ("Ctrl+S",          "Save"),
             ("Ctrl+Shift+S",    "Save As"),
             ("Drag & drop",     "Drop a file onto the window to open it"),
+            ("Autosave",        "Saved tabs write to disk on tab/app close, no prompt"),
+            ("Autosave",        "Renamed-but-unsaved tabs auto-create a file on close"),
+            ("📁 button",        "Open the default save folder"),
             ("File > Set Default Folder", "Change the default save location"),
             # -- Editing --
             ("— Editing —",     ""),
@@ -1135,6 +1183,31 @@ class Editor(TkinterDnD.Tk if _DND_AVAILABLE else tk.Tk):
         self._active.filepath = path
         self._active.title    = os.path.basename(path)
         self._write_file(self._active, path)
+
+    def _autosave_tab(self, tab):
+        """Silently save a tab's changes, no prompts. Used on tab/app close.
+
+        - If the tab is already tied to a file on disk, just write to it.
+        - Otherwise, if the user has explicitly renamed the tab, create a new
+          file for it (in the default save folder) using that name.
+        - Otherwise (never saved, never renamed) there's no filename to use,
+          so it's left alone -- its content still lives in the session file
+          for the next launch, but no stray file is created on disk.
+        """
+        if not tab.modified or tab.text is None:
+            return
+        if tab.filepath:
+            self._write_file(tab, tab.filepath)
+            return
+        if tab.named:
+            ext  = ".txt"
+            name = _sanitize_filename(tab.title.rstrip(" *"))
+            path = _unique_path(os.path.join(self._default_dir, name + ext))
+            tab.filepath = path
+            tab.title    = os.path.basename(path)
+            if tab.title_lbl:
+                tab.title_lbl.configure(text=tab.title)
+            self._write_file(tab, path)
 
     def _write_file(self, tab, path):
         tw = tab.text
@@ -1953,14 +2026,7 @@ class Editor(TkinterDnD.Tk if _DND_AVAILABLE else tk.Tk):
         if tab is None:
             return
         if tab.modified:
-            ans = messagebox.askyesnocancel(
-                "Unsaved Changes",
-                "Save changes to '%s' before closing?" % tab.title.rstrip(" *"),
-                parent=self)
-            if ans is None:
-                return
-            if ans:
-                self.cmd_save()
+            self._autosave_tab(tab)
         if tab.text_frame:
             tab.text_frame.destroy()
         old_grp = tab.group
@@ -1981,6 +2047,9 @@ class Editor(TkinterDnD.Tk if _DND_AVAILABLE else tk.Tk):
     # Session persistence
     # ----------------------------------------------------------------
     def _on_quit(self):
+        for tab in self._tabs:
+            if tab.modified:
+                self._autosave_tab(tab)
         self._save_session()
         self.destroy()
 
@@ -2001,6 +2070,7 @@ class Editor(TkinterDnD.Tk if _DND_AVAILABLE else tk.Tk):
             tab_list.append({
                 "title":    tab.title,
                 "filepath": tab.filepath,
+                "named":    tab.named,
                 "color":    tab.color,
                 "text_bg":  tab.text_bg,
                 "text_fg":  tab.text_fg,
@@ -2057,6 +2127,7 @@ class Editor(TkinterDnD.Tk if _DND_AVAILABLE else tk.Tk):
         for tdata in data.get("tabs", []):
             tab          = Tab(tdata.get("title", "Untitled"))
             tab.filepath = tdata.get("filepath")
+            tab.named    = tdata.get("named", False)
             tab.color    = tdata.get("color")
             tab.text_bg  = tdata.get("text_bg")
             tab.text_fg  = tdata.get("text_fg")

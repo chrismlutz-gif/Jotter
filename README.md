@@ -3,7 +3,7 @@
 A lightweight, tabbed rich-text editor built for speed and organisation — dark mode included.
 
 ![Python](https://img.shields.io/badge/Python-3.9%2B-blue)
-![Version](https://img.shields.io/badge/Version-2.4-orange)
+![Version](https://img.shields.io/badge/Version-2.6-orange)
 ![License](https://img.shields.io/badge/License-MIT-green)
 ![Platform](https://img.shields.io/badge/Platform-Windows-lightgrey)
 
@@ -22,7 +22,9 @@ A lightweight, tabbed rich-text editor built for speed and organisation — dark
 ### Files
 - **TXT, RTF, and Markdown** — open and save `.txt`, `.rtf`, and `.md` files
 - **Drag and drop** — drag a file from Explorer onto the window to open it
-- **Default save folder** — configurable via File → Set Default Save Folder
+- **Autosave on close** — closing a tab or the app silently saves changes, no confirmation prompt
+- **Autosave by tab name** — rename a tab and it will auto-create a file using that name (in your default save folder) the next time it's closed, if it hasn't been saved yet
+- **Default save folder** — configurable via File → Set Default Save Folder, and openable directly from the 📁 button next to the tab bar's "+" button
 - **Session persistence** — reopens tabs, content, window position, and theme on next launch
 
 ### Formatting
@@ -72,6 +74,7 @@ A lightweight, tabbed rich-text editor built for speed and organisation — dark
 | `S̶` toolbar button | Strikethrough |
 | `↵ Wrap` | Toggle word wrap for active tab |
 | `✕ fmt` | Clear all formatting |
+| `📁` button | Open the default save folder |
 
 ---
 
