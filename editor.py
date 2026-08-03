@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-editor.py -- Jotter  v2.6
+editor.py -- Jotter  v2.6.1
   * Multiple tabs with drag-to-reorder and drag-to-group
   * Per-tab accent colour, text background, text foreground
   * RTF read/write with formatting toolbar
@@ -996,7 +996,7 @@ class Editor(TkinterDnD.Tk if _DND_AVAILABLE else tk.Tk):
         win.grab_set()
         tk.Label(win, text="Jotter", bg=T["bg"], fg=T["menu_fg"],
                  font=("Segoe UI", 20, "bold"), pady=12).pack()
-        tk.Label(win, text="Version 2.6", bg=T["bg"], fg=T["menu_fg"],
+        tk.Label(win, text="Version 2.6.1", bg=T["bg"], fg=T["menu_fg"],
                  font=("Segoe UI", 11)).pack()
         tk.Label(win, text="A lightweight rich-text editor", bg=T["bg"],
                  fg=T["close_fg"], font=("Segoe UI", 10), pady=4).pack()
@@ -1017,8 +1017,9 @@ class Editor(TkinterDnD.Tk if _DND_AVAILABLE else tk.Tk):
             ("Ctrl+S",          "Save"),
             ("Ctrl+Shift+S",    "Save As"),
             ("Drag & drop",     "Drop a file onto the window to open it"),
-            ("Autosave",        "Saved tabs write to disk on tab/app close, no prompt"),
+            ("Autosave",        "Titled tabs (saved or renamed) save silently on tab/app close"),
             ("Autosave",        "Renamed-but-unsaved tabs auto-create a file on close"),
+            ("Untitled tabs",   "Still prompt to save before closing"),
             ("📁 button",        "Open the default save folder"),
             ("File > Set Default Folder", "Change the default save location"),
             # -- Editing --
@@ -1184,15 +1185,17 @@ class Editor(TkinterDnD.Tk if _DND_AVAILABLE else tk.Tk):
         self._active.title    = os.path.basename(path)
         self._write_file(self._active, path)
 
+    def _is_titled(self, tab):
+        """A tab counts as 'titled' once it's tied to a real file, or the
+        user has explicitly renamed it (even if it hasn't been saved yet)."""
+        return bool(tab.filepath) or tab.named
+
     def _autosave_tab(self, tab):
-        """Silently save a tab's changes, no prompts. Used on tab/app close.
+        """Silently save a titled tab's changes, no prompts.
 
         - If the tab is already tied to a file on disk, just write to it.
         - Otherwise, if the user has explicitly renamed the tab, create a new
           file for it (in the default save folder) using that name.
-        - Otherwise (never saved, never renamed) there's no filename to use,
-          so it's left alone -- its content still lives in the session file
-          for the next launch, but no stray file is created on disk.
         """
         if not tab.modified or tab.text is None:
             return
@@ -1208,6 +1211,31 @@ class Editor(TkinterDnD.Tk if _DND_AVAILABLE else tk.Tk):
             if tab.title_lbl:
                 tab.title_lbl.configure(text=tab.title)
             self._write_file(tab, path)
+
+    def _confirm_close_tab(self, tab):
+        """Handle a modified tab that's about to close (tab close or app quit).
+
+        Titled tabs (has a filepath, or has been renamed) autosave silently.
+        Untitled tabs prompt to save, matching a normal editor's behavior,
+        since there's no filename to fall back on automatically.
+
+        Returns False if the user cancelled (the close should be aborted),
+        True otherwise.
+        """
+        if not tab.modified or tab.text is None:
+            return True
+        if self._is_titled(tab):
+            self._autosave_tab(tab)
+            return True
+        ans = messagebox.askyesnocancel(
+            "Unsaved Changes",
+            "Save changes to '%s' before closing?" % tab.title.rstrip(" *"),
+            parent=self)
+        if ans is None:
+            return False
+        if ans:
+            self.cmd_save()
+        return True
 
     def _write_file(self, tab, path):
         tw = tab.text
@@ -2025,8 +2053,8 @@ class Editor(TkinterDnD.Tk if _DND_AVAILABLE else tk.Tk):
             tab = self._active
         if tab is None:
             return
-        if tab.modified:
-            self._autosave_tab(tab)
+        if not self._confirm_close_tab(tab):
+            return
         if tab.text_frame:
             tab.text_frame.destroy()
         old_grp = tab.group
@@ -2048,8 +2076,8 @@ class Editor(TkinterDnD.Tk if _DND_AVAILABLE else tk.Tk):
     # ----------------------------------------------------------------
     def _on_quit(self):
         for tab in self._tabs:
-            if tab.modified:
-                self._autosave_tab(tab)
+            if not self._confirm_close_tab(tab):
+                return  # user cancelled -- abort the quit entirely
         self._save_session()
         self.destroy()
 
