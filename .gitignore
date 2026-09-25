@@ -10,6 +10,9 @@ installer/
 jotter_error.log
 editor_error.log
 
+# Local app settings/preferences (default save folder, clipboard tab lines, etc.)
+jotter_settings.json
+
 # Python cache
 __pycache__/
 *.py[cod]

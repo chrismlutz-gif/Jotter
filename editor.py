@@ -1,13 +1,15 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-editor.py -- Jotter  v2.6.1
+editor.py -- Jotter  v2.7
   * Multiple tabs with drag-to-reorder and drag-to-group
   * Per-tab accent colour, text background, text foreground
   * RTF read/write with formatting toolbar
   * Find / Replace bar
   * Dark / light mode, Always-on-top
   * Session persistence
+  * Clipboard tab -- a singleton specialty tab of color-coded,
+    copy-to-clipboard snippet lines, persisted via app settings
 """
 
 import tkinter as tk
@@ -181,6 +183,16 @@ class Tab:
         self.oval_id    = None
         self.title_lbl  = None
         self.close_lbl  = None
+        # -- Specialty tabs --
+        # "text" is the normal rich-text tab. Other kinds (e.g. "clipboard")
+        # render an entirely different body in the same text_frame slot and
+        # are limited to a single open instance across the whole app.
+        self.kind             = "text"
+        self.clip_rows        = []     # runtime widget refs for a "clipboard" tab
+        self.clip_canvas      = None
+        self.clip_scroll_inner = None
+        self.clip_hint_lbl    = None
+        self._clip_save_job   = None
 
 
 class Editor(TkinterDnD.Tk if _DND_AVAILABLE else tk.Tk):
@@ -306,6 +318,7 @@ class Editor(TkinterDnD.Tk if _DND_AVAILABLE else tk.Tk):
 
         fm = tk.Menu(mb, **kw)
         fm.add_command(label="New Tab       Ctrl+N", command=self.cmd_new_tab)
+        fm.add_command(label="New Clipboard Tab", command=self.cmd_new_clipboard_tab)
         fm.add_command(label="Open...       Ctrl+O", command=self.cmd_open)
         fm.add_separator()
         fm.add_command(label="Save          Ctrl+S", command=self.cmd_save)
@@ -393,6 +406,18 @@ class Editor(TkinterDnD.Tk if _DND_AVAILABLE else tk.Tk):
         folder.bind("<Enter>", lambda e: folder.configure(bg=T["tab_hover"]))
         folder.bind("<Leave>", lambda e: folder.configure(bg=T["tab_idle"]))
         ToolTip(folder, "Open default save folder")
+
+        # "clipboard" specialty-tab button, pinned just left of the folder button.
+        # Only one Clipboard tab can be open at a time; clicking this either
+        # opens it or switches to the one already open.
+        clipbtn = tk.Label(outer, text=" 📋 ", bg=T["tab_idle"], fg=T["toolbar_fg"],
+                           font=("Segoe UI", 11), cursor="hand2",
+                           relief="flat", padx=2, pady=3)
+        clipbtn.pack(side="right", padx=(0, 0), pady=3)
+        clipbtn.bind("<Button-1>", lambda e: self.cmd_new_clipboard_tab())
+        clipbtn.bind("<Enter>", lambda e: clipbtn.configure(bg=T["tab_hover"]))
+        clipbtn.bind("<Leave>", lambda e: clipbtn.configure(bg=T["tab_idle"]))
+        ToolTip(clipbtn, "Open the Clipboard tab\n(only one can be open at a time)")
 
     def _rebuild_tab_buttons(self):
         T = self._T
@@ -518,6 +543,8 @@ class Editor(TkinterDnD.Tk if _DND_AVAILABLE else tk.Tk):
         if tab.text:
             self._apply_text_colors(tab)
             tab.text.focus_set()
+        elif tab.kind == "clipboard" and tab.clip_rows:
+            tab.clip_rows[0]["text"].focus_set()
         self._restore_active_highlight()
         self._refresh_status()
         if hasattr(self, "_wrap_on") and tab.text:
@@ -819,8 +846,9 @@ class Editor(TkinterDnD.Tk if _DND_AVAILABLE else tk.Tk):
         m = tk.Menu(self, **kw)
         m.add_command(label="Rename...",          command=lambda: self._rename_tab(tab))
         m.add_command(label="Tab Color...",       command=lambda: self._show_tab_color_picker(tab))
-        m.add_command(label="Text Background...", command=lambda: self._pick_text_bg(tab))
-        m.add_command(label="Reset Text Colors",  command=lambda: self._reset_text_colors(tab))
+        if tab.kind == "text":
+            m.add_command(label="Text Background...", command=lambda: self._pick_text_bg(tab))
+            m.add_command(label="Reset Text Colors",  command=lambda: self._reset_text_colors(tab))
         m.add_separator()
         m.add_command(label="Close",              command=lambda: self.cmd_close_tab(tab))
         try:
@@ -996,7 +1024,7 @@ class Editor(TkinterDnD.Tk if _DND_AVAILABLE else tk.Tk):
         win.grab_set()
         tk.Label(win, text="Jotter", bg=T["bg"], fg=T["menu_fg"],
                  font=("Segoe UI", 20, "bold"), pady=12).pack()
-        tk.Label(win, text="Version 2.6.1", bg=T["bg"], fg=T["menu_fg"],
+        tk.Label(win, text="Version 2.7", bg=T["bg"], fg=T["menu_fg"],
                  font=("Segoe UI", 11)).pack()
         tk.Label(win, text="A lightweight rich-text editor", bg=T["bg"],
                  fg=T["close_fg"], font=("Segoe UI", 10), pady=4).pack()
@@ -1011,6 +1039,14 @@ class Editor(TkinterDnD.Tk if _DND_AVAILABLE else tk.Tk):
             ("＋ button",        "New tab (tab bar)"),
             ("Drag tab",        "Reorder or group tabs"),
             ("Right-click tab", "Rename, accent color, text bg/fg, close"),
+            # -- Specialty tabs --
+            ("— Specialty Tabs —", ""),
+            ("📋 button",        "Open the Clipboard tab (only one at a time)"),
+            ("Copy",            "Loads a line's text onto the system clipboard"),
+            ("+ Add Line",      "Add a new snippet line"),
+            ("× button",        "Remove a line"),
+            ("Colored dot",     "Color-code a line; click to change"),
+            ("Persistence",     "Lines persist across app restarts, even if the tab is closed"),
             # -- Files --
             ("— Files —",       ""),
             ("Ctrl+O",          "Open file (.txt, .rtf, .md)"),
@@ -1118,7 +1154,8 @@ class Editor(TkinterDnD.Tk if _DND_AVAILABLE else tk.Tk):
         """Open a file by path, reusing the active tab only if it's blank."""
         path = os.path.normpath(path)
         tab = self._active
-        if tab is None or tab.modified or tab.filepath is not None:
+        if (tab is None or tab.modified or tab.filepath is not None
+                or tab.kind != "text"):
             tab = Tab(os.path.basename(path))
             self._tabs.append(tab)
             self._make_text_area(tab)
@@ -1157,7 +1194,7 @@ class Editor(TkinterDnD.Tk if _DND_AVAILABLE else tk.Tk):
                 self._open_path(path)
 
     def cmd_save(self, event=None):
-        if self._active is None:
+        if self._active is None or self._active.kind != "text":
             return
         if self._active.filepath is None:
             self.cmd_save_as()
@@ -1165,7 +1202,7 @@ class Editor(TkinterDnD.Tk if _DND_AVAILABLE else tk.Tk):
         self._write_file(self._active, self._active.filepath)
 
     def cmd_save_as(self, event=None):
-        if self._active is None:
+        if self._active is None or self._active.kind != "text":
             return
         ext = os.path.splitext(self._active.filepath or "")[1].lower()
         default_ext = ext if ext in (".rtf", ".md", ".txt") else ".txt"
@@ -1197,7 +1234,7 @@ class Editor(TkinterDnD.Tk if _DND_AVAILABLE else tk.Tk):
         - Otherwise, if the user has explicitly renamed the tab, create a new
           file for it (in the default save folder) using that name.
         """
-        if not tab.modified or tab.text is None:
+        if tab.kind != "text" or not tab.modified or tab.text is None:
             return
         if tab.filepath:
             self._write_file(tab, tab.filepath)
@@ -1259,6 +1296,9 @@ class Editor(TkinterDnD.Tk if _DND_AVAILABLE else tk.Tk):
         self.configure(bg=self._T["bg"])
         self._rebuild_tab_buttons()
         for tab in self._tabs:
+            if tab.kind == "clipboard":
+                self._apply_clip_theme(tab)
+                continue
             self._apply_text_colors(tab)
             if tab.linenos:
                 T = self._T
@@ -2002,6 +2042,268 @@ class Editor(TkinterDnD.Tk if _DND_AVAILABLE else tk.Tk):
         ln.yview_moveto(tw.yview()[0])
 
     # ----------------------------------------------------------------
+    # Clipboard tab (specialty tab)
+    #
+    # A singleton tab -- only one can be open at a time -- that holds a
+    # continuous, scrollable list of lines. Each line is its own little
+    # text box with a "Copy" button that loads that line's text onto the
+    # system clipboard, a "x" button to remove the line, and a colored
+    # dot to tag the line with a color. Lines persist independently of
+    # the tab itself (in jotter_settings.json, the same file used for
+    # other app-wide preferences), so they survive both closing the tab
+    # and restarting the app.
+    # ----------------------------------------------------------------
+    def cmd_new_clipboard_tab(self, event=None):
+        existing = next((t for t in self._tabs if t.kind == "clipboard"), None)
+        if existing:
+            self._activate(existing)
+            return
+        tab = Tab("📋 Clipboard")
+        tab.kind  = "clipboard"
+        tab.color = "#c586c0"
+        self._tabs.append(tab)
+        self._make_clipboard_area(tab)
+        self._rebuild_tab_buttons()
+        self._activate(tab)
+
+    def _load_clip_lines(self):
+        raw = self._load_settings().get("clipboard_lines", [])
+        if not isinstance(raw, list):
+            return []
+        lines = []
+        for item in raw:
+            if isinstance(item, dict):
+                lines.append({
+                    "text":  item.get("text", ""),
+                    "color": item.get("color") or _ACCENT_CYCLE[0],
+                })
+        return lines
+
+    def _save_clip_lines_now(self, tab):
+        """Write this tab's current lines to jotter_settings.json immediately."""
+        lines = []
+        for row in tab.clip_rows:
+            try:
+                text = row["text"].get("1.0", "end-1c")
+            except Exception:
+                text = ""
+            lines.append({"text": text, "color": row["color"]})
+        settings = self._load_settings()
+        settings["clipboard_lines"] = lines
+        self._save_settings(settings)
+
+    def _schedule_clip_save(self, tab):
+        """Debounce saves while the user is actively typing a line."""
+        if tab._clip_save_job:
+            try:
+                self.after_cancel(tab._clip_save_job)
+            except Exception:
+                pass
+        tab._clip_save_job = self.after(500, lambda: self._save_clip_lines_now(tab))
+
+    def _make_clipboard_area(self, tab):
+        T     = self._T
+        frame = tk.Frame(self._body_frame, bg=T["bg"])
+        tab.text_frame = frame
+
+        hint = tk.Label(frame,
+            text="Reusable snippets — click Copy to load a line onto your clipboard.",
+            bg=T["bg"], fg=T["close_fg"], font=("Segoe UI", 9),
+            anchor="w", padx=10, pady=6)
+        hint.pack(side="top", fill="x")
+        tab.clip_hint_lbl = hint
+
+        top_bar = tk.Frame(frame, bg=T["tab_bar"])
+        top_bar.pack(side="top", fill="x")
+        add_btn = tk.Label(top_bar, text="  + Add Line  ", bg=T["tab_idle"],
+                           fg=T["toolbar_fg"], font=("Segoe UI", 10),
+                           cursor="hand2", pady=6)
+        add_btn.pack(side="left", padx=8, pady=6)
+        add_btn.bind("<Button-1>", lambda e: self._clip_add_row(tab))
+        add_btn.bind("<Enter>", lambda e: add_btn.configure(bg=T["tab_hover"]))
+        add_btn.bind("<Leave>", lambda e: add_btn.configure(bg=T["tab_idle"]))
+        ToolTip(add_btn, "Add a new line")
+        tab.clip_add_btn = add_btn
+        tab.clip_top_bar = top_bar
+
+        scroll_outer = tk.Frame(frame, bg=T["bg"])
+        scroll_outer.pack(side="top", fill="both", expand=True)
+
+        canvas = tk.Canvas(scroll_outer, bg=T["bg"], highlightthickness=0, bd=0)
+        canvas.pack(side="left", fill="both", expand=True)
+        sb = ttk.Scrollbar(scroll_outer, orient="vertical", command=canvas.yview,
+                           style="Jotter.Vertical.TScrollbar")
+        sb.pack(side="right", fill="y")
+        canvas.configure(yscrollcommand=sb.set)
+
+        inner  = tk.Frame(canvas, bg=T["bg"])
+        win_id = canvas.create_window((0, 0), window=inner, anchor="nw")
+        inner.bind("<Configure>",
+                   lambda e, c=canvas: c.configure(scrollregion=c.bbox("all")))
+        canvas.bind("<Configure>",
+                   lambda e, c=canvas, w=win_id: c.itemconfig(w, width=e.width))
+
+        def _wheel(e, c=canvas):
+            c.yview_scroll(int(-1 * (e.delta / 120)), "units")
+        # Only capture the mouse wheel while the pointer is actually over
+        # this canvas, so it doesn't hijack scrolling elsewhere in the app.
+        canvas.bind("<Enter>", lambda e: (
+            canvas.bind_all("<MouseWheel>", _wheel),
+            canvas.bind_all("<Button-4>", lambda e: canvas.yview_scroll(-1, "units")),
+            canvas.bind_all("<Button-5>", lambda e: canvas.yview_scroll(1, "units"))))
+        canvas.bind("<Leave>", lambda e: (
+            canvas.unbind_all("<MouseWheel>"),
+            canvas.unbind_all("<Button-4>"),
+            canvas.unbind_all("<Button-5>")))
+
+        tab.clip_canvas       = canvas
+        tab.clip_scroll_inner = inner
+
+        tab.clip_rows = []
+        lines = self._load_clip_lines()
+        if not lines:
+            lines = [{"text": "", "color": _ACCENT_CYCLE[0]}]
+        for item in lines:
+            self._clip_add_row(tab, text=item.get("text", ""),
+                               color=item.get("color"), persist=False)
+
+    def _clip_add_row(self, tab, text="", color=None, persist=True):
+        T = self._T
+        color  = color or _ACCENT_CYCLE[len(tab.clip_rows) % len(_ACCENT_CYCLE)]
+        parent = tab.clip_scroll_inner
+
+        row_frame = tk.Frame(parent, bg=T["bg"])
+        row_frame.pack(side="top", fill="x", padx=8, pady=4)
+
+        dot = tk.Canvas(row_frame, width=14, height=14, bg=T["bg"],
+                        highlightthickness=0, cursor="hand2")
+        dot.pack(side="left", padx=(2, 8), pady=4, anchor="n")
+        oid = dot.create_oval(1, 1, 13, 13, fill=color, outline="")
+
+        txt = tk.Text(row_frame, height=2, wrap="word", undo=True,
+                      bg=T["text_bg"], fg=T["text_fg"],
+                      insertbackground=T["text_fg"], relief="flat", bd=6,
+                      font=("Consolas", 10), exportselection=False)
+        txt.pack(side="left", fill="both", expand=True)
+        if text:
+            txt.insert("1.0", text)
+
+        btn_col = tk.Frame(row_frame, bg=T["bg"])
+        btn_col.pack(side="left", padx=(6, 0))
+        copy_btn = tk.Label(btn_col, text=" Copy ", bg=T["tab_idle"],
+                            fg=T["toolbar_fg"], font=("Segoe UI", 9),
+                            cursor="hand2", pady=2)
+        copy_btn.pack(side="top", pady=(0, 2))
+        remove_btn = tk.Label(btn_col, text="  ×  ", bg=T["tab_idle"],
+                              fg=T["close_fg"], font=("Segoe UI", 10),
+                              cursor="hand2")
+        remove_btn.pack(side="top")
+
+        sep = tk.Frame(parent, height=1, bg=T["border"])
+        sep.pack(side="top", fill="x", padx=8)
+
+        row = {"frame": row_frame, "text": txt, "dot": dot, "oval": oid,
+              "color": color, "copy_btn": copy_btn, "remove_btn": remove_btn,
+              "sep": sep}
+        tab.clip_rows.append(row)
+
+        def _grow(tw=txt):
+            n = int(tw.index("end-1c").split(".")[0])
+            tw.configure(height=max(2, min(n, 8)))
+
+        txt.bind("<KeyRelease>", lambda e: (_grow(), self._schedule_clip_save(tab)))
+        dot.bind("<Button-1>", lambda e: self._clip_pick_color(tab, row))
+        copy_btn.bind("<Button-1>", lambda e: self._clip_copy_row(tab, row))
+        copy_btn.bind("<Enter>", lambda e: copy_btn.configure(bg=T["tab_hover"]))
+        copy_btn.bind("<Leave>", lambda e: copy_btn.configure(bg=T["tab_idle"]))
+        remove_btn.bind("<Button-1>", lambda e: self._clip_remove_row(tab, row))
+        remove_btn.bind("<Enter>", lambda e: remove_btn.configure(bg=T["tab_hover"]))
+        remove_btn.bind("<Leave>", lambda e: remove_btn.configure(bg=T["tab_idle"]))
+
+        self._refresh_status()
+        if persist:
+            self._schedule_clip_save(tab)
+
+    def _clip_remove_row(self, tab, row):
+        if row not in tab.clip_rows:
+            return
+        row["frame"].destroy()
+        row["sep"].destroy()
+        tab.clip_rows.remove(row)
+        self._save_clip_lines_now(tab)
+        self._refresh_status()
+
+    def _clip_copy_row(self, tab, row):
+        text = row["text"].get("1.0", "end-1c")
+        self.clipboard_clear()
+        self.clipboard_append(text)
+        self.update_idletasks()
+        orig = row["copy_btn"].cget("text")
+        row["copy_btn"].configure(text=" ✓ ")
+        def _restore():
+            try:
+                if row["copy_btn"].winfo_exists():
+                    row["copy_btn"].configure(text=orig)
+            except Exception:
+                pass
+        self.after(700, _restore)
+
+    def _clip_pick_color(self, tab, row):
+        T   = self._T
+        win = tk.Toplevel(self)
+        win.title("Line Color")
+        win.configure(bg=T["tab_bar"])
+        win.resizable(False, False)
+        win.transient(self)
+        win.grab_set()
+        tk.Label(win, text="Choose a color:", bg=T["tab_bar"],
+                 fg=T["text_fg"], font=("Segoe UI", 10), pady=8).pack()
+        row_frame = tk.Frame(win, bg=T["tab_bar"])
+        row_frame.pack(padx=12, pady=(0, 8))
+        def pick(c):
+            row["color"] = c
+            row["dot"].itemconfig(row["oval"], fill=c)
+            self._save_clip_lines_now(tab)
+            win.destroy()
+        for c in _ACCENT_CYCLE:
+            b = tk.Canvas(row_frame, width=24, height=24, bg=T["tab_bar"],
+                         highlightthickness=0, cursor="hand2")
+            b.pack(side="left", padx=3)
+            b.create_oval(3, 3, 21, 21, fill=c, outline="")
+            b.bind("<Button-1>", lambda e, col=c: pick(col))
+        def custom():
+            r = colorchooser.askcolor(color=row["color"], parent=win,
+                                      title="Custom Color")
+            if r and r[1]:
+                pick(r[1])
+        tk.Button(win, text="Custom...", command=custom,
+                 bg=T["tab_idle"], fg=T["text_fg"], relief="flat",
+                 pady=4).pack(pady=(0, 10))
+
+    def _apply_clip_theme(self, tab):
+        T = self._T
+        if tab.text_frame:
+            tab.text_frame.configure(bg=T["bg"])
+        if tab.clip_hint_lbl:
+            tab.clip_hint_lbl.configure(bg=T["bg"], fg=T["close_fg"])
+        if tab.clip_canvas:
+            tab.clip_canvas.configure(bg=T["bg"])
+        if tab.clip_scroll_inner:
+            tab.clip_scroll_inner.configure(bg=T["bg"])
+        if getattr(tab, "clip_top_bar", None):
+            tab.clip_top_bar.configure(bg=T["tab_bar"])
+        if getattr(tab, "clip_add_btn", None):
+            tab.clip_add_btn.configure(bg=T["tab_idle"], fg=T["toolbar_fg"])
+        for row in tab.clip_rows:
+            row["frame"].configure(bg=T["bg"])
+            row["dot"].configure(bg=T["bg"])
+            row["text"].configure(bg=T["text_bg"], fg=T["text_fg"],
+                                  insertbackground=T["text_fg"])
+            row["copy_btn"].configure(bg=T["tab_idle"], fg=T["toolbar_fg"])
+            row["remove_btn"].configure(bg=T["tab_idle"], fg=T["close_fg"])
+            row["sep"].configure(bg=T["border"])
+
+    # ----------------------------------------------------------------
     # Status bar
     # ----------------------------------------------------------------
     def _build_statusbar(self):
@@ -2019,7 +2321,17 @@ class Editor(TkinterDnD.Tk if _DND_AVAILABLE else tk.Tk):
 
     def _refresh_status(self):
         tab = self._active
-        if tab is None or tab.text is None:
+        if tab is None:
+            self._status_left.configure(text="")
+            self._status_right.configure(text="")
+            return
+        if tab.kind == "clipboard":
+            n = len(tab.clip_rows)
+            self._status_left.configure(text="Clipboard tab")
+            self._status_right.configure(
+                text="%d line%s" % (n, "s" if n != 1 else ""))
+            return
+        if tab.text is None:
             self._status_left.configure(text="")
             self._status_right.configure(text="")
             return
@@ -2104,6 +2416,7 @@ class Editor(TkinterDnD.Tk if _DND_AVAILABLE else tk.Tk):
                 "text_fg":  tab.text_fg,
                 "group_id": grp_id,
                 "active":   tab is self._active,
+                "kind":     tab.kind,
                 "content":  tab.text.get("1.0", "end-1c") if tab.text else "",
             })
         # Save window geometry (but not if minimised — state is 'iconic')
@@ -2153,7 +2466,13 @@ class Editor(TkinterDnD.Tk if _DND_AVAILABLE else tk.Tk):
 
         active_tab = None
         for tdata in data.get("tabs", []):
+            kind = tdata.get("kind", "text")
+            if kind == "clipboard" and any(t.kind == "clipboard" for t in self._tabs):
+                # Enforce the single-instance rule even against a stale/
+                # corrupted session file that somehow has two.
+                continue
             tab          = Tab(tdata.get("title", "Untitled"))
+            tab.kind     = kind
             tab.filepath = tdata.get("filepath")
             tab.named    = tdata.get("named", False)
             tab.color    = tdata.get("color")
@@ -2163,11 +2482,14 @@ class Editor(TkinterDnD.Tk if _DND_AVAILABLE else tk.Tk):
             if gid and gid in group_map:
                 tab.group = group_map[gid]
             self._tabs.append(tab)
-            self._make_text_area(tab)
-            content = tdata.get("content", "")
-            if content and tab.text:
-                tab.text.insert("1.0", content)
-                tab.text.edit_reset()
+            if kind == "clipboard":
+                self._make_clipboard_area(tab)
+            else:
+                self._make_text_area(tab)
+                content = tdata.get("content", "")
+                if content and tab.text:
+                    tab.text.insert("1.0", content)
+                    tab.text.edit_reset()
             if tdata.get("active"):
                 active_tab = tab
 

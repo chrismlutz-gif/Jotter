@@ -3,7 +3,7 @@
 A lightweight, tabbed rich-text editor built for speed and organisation — dark mode included.
 
 ![Python](https://img.shields.io/badge/Python-3.9%2B-blue)
-![Version](https://img.shields.io/badge/Version-2.6.1-orange)
+![Version](https://img.shields.io/badge/Version-2.7-orange)
 ![License](https://img.shields.io/badge/License-MIT-green)
 ![Platform](https://img.shields.io/badge/Platform-Windows-lightgrey)
 
@@ -36,6 +36,13 @@ A lightweight, tabbed rich-text editor built for speed and organisation — dark
 - **Word wrap** — toggle per tab
 - **Change case** — UPPER, lower, Capitalise, tOGGLE
 - **Clear formatting** — strip all formatting from a selection, or the whole document
+
+### Specialty Tabs
+- **Clipboard tab** — a singleton tab (only one can be open at a time) for reusable text snippets. Open it from the 📋 button next to the tab bar's "+" button, or File → New Clipboard Tab
+- **Continuous, growable lines** — add or remove lines freely; each line's text box grows as you type
+- **One-click copy** — the Copy button on each line loads its text onto the system clipboard, ready to paste anywhere
+- **Per-line color coding** — click a line's colored dot to tag it with a color
+- **Durable persistence** — lines are saved to your settings immediately as you edit them, so they survive closing the tab or restarting Jotter entirely
 
 ### Interface
 - **Dark and light mode** — toggle under Options
