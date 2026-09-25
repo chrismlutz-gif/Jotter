@@ -1,5 +1,5 @@
 #define MyAppName      "Jotter"
-#define MyAppVersion   "2.7"
+#define MyAppVersion   "2.7.1"
 #define MyAppPublisher "Chris Lutz"
 #define MyAppExeName   "Jotter.exe"
 

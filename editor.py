@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-editor.py -- Jotter  v2.7
+editor.py -- Jotter  v2.7.1
   * Multiple tabs with drag-to-reorder and drag-to-group
   * Per-tab accent colour, text background, text foreground
   * RTF read/write with formatting toolbar
@@ -254,6 +254,12 @@ class Editor(TkinterDnD.Tk if _DND_AVAILABLE else tk.Tk):
 
         if not self._load_session():
             self.cmd_new_tab()
+
+        if not _DND_AVAILABLE:
+            # Without tkinterdnd2, drag-and-drop silently doesn't work at all
+            # (Windows just shows a "no drop" cursor) with no other sign why.
+            # Surface it once, rather than leaving it a silent mystery.
+            self.after(150, self._maybe_warn_no_dnd)
 
     # ----------------------------------------------------------------
     # Scrollbar style
@@ -981,6 +987,44 @@ class Editor(TkinterDnD.Tk if _DND_AVAILABLE else tk.Tk):
         except Exception:
             pass
 
+    def _maybe_warn_no_dnd(self):
+        """Tell the user drag-and-drop is off, instead of leaving it a silent
+        mystery -- a missing 'tkinterdnd2' package disables it with no error
+        and no log entry, just a "no drop" cursor over the whole window."""
+        if self._load_settings().get("dnd_warning_dismissed"):
+            return
+        T   = self._T
+        win = tk.Toplevel(self)
+        win.title("Drag & Drop Unavailable")
+        win.configure(bg=T["bg"])
+        win.resizable(False, False)
+        win.transient(self)
+        win.grab_set()
+        tk.Label(win, text="⚠", bg=T["bg"], fg=T["default_dot"],
+                 font=("Segoe UI", 26)).pack(pady=(14, 0))
+        tk.Label(win,
+            text=("Drag-and-drop is unavailable because the \"tkinterdnd2\"\n"
+                  "package isn't installed in this Python environment.\n\n"
+                  "To enable it, run:\n\n"
+                  "        pip install tkinterdnd2\n\n"
+                  "...then restart Jotter. Everything else works normally."),
+            bg=T["bg"], fg=T["menu_fg"], font=("Segoe UI", 10),
+            justify="left", padx=24, pady=8).pack()
+        dont_show = tk.BooleanVar(value=False)
+        tk.Checkbutton(win, text="Don't show this again", variable=dont_show,
+                       bg=T["bg"], fg=T["menu_fg"], selectcolor=T["tab_idle"],
+                       activebackground=T["bg"], activeforeground=T["menu_fg"],
+                       relief="flat").pack(pady=(6, 0))
+        def _close():
+            if dont_show.get():
+                s = self._load_settings()
+                s["dnd_warning_dismissed"] = True
+                self._save_settings(s)
+            win.destroy()
+        tk.Button(win, text="OK", command=_close, bg=T["tab_idle"],
+                  fg=T["menu_fg"], relief="flat", padx=24, pady=4).pack(pady=(12, 16))
+        win.protocol("WM_DELETE_WINDOW", _close)
+
     def cmd_open_save_folder(self, event=None):
         """Open the default save folder (from settings JSON) in the OS file browser."""
         path = self._default_dir
@@ -1024,7 +1068,7 @@ class Editor(TkinterDnD.Tk if _DND_AVAILABLE else tk.Tk):
         win.grab_set()
         tk.Label(win, text="Jotter", bg=T["bg"], fg=T["menu_fg"],
                  font=("Segoe UI", 20, "bold"), pady=12).pack()
-        tk.Label(win, text="Version 2.7", bg=T["bg"], fg=T["menu_fg"],
+        tk.Label(win, text="Version 2.7.1", bg=T["bg"], fg=T["menu_fg"],
                  font=("Segoe UI", 11)).pack()
         tk.Label(win, text="A lightweight rich-text editor", bg=T["bg"],
                  fg=T["close_fg"], font=("Segoe UI", 10), pady=4).pack()
@@ -2145,16 +2189,30 @@ class Editor(TkinterDnD.Tk if _DND_AVAILABLE else tk.Tk):
 
         def _wheel(e, c=canvas):
             c.yview_scroll(int(-1 * (e.delta / 120)), "units")
+        def _wheel_up(e, c=canvas):
+            c.yview_scroll(-1, "units")
+        def _wheel_down(e, c=canvas):
+            c.yview_scroll(1, "units")
+        def _bind_wheel(e=None):
+            canvas.bind_all("<MouseWheel>", _wheel)
+            canvas.bind_all("<Button-4>", _wheel_up)
+            canvas.bind_all("<Button-5>", _wheel_down)
+        def _unbind_wheel(e=None):
+            try:
+                canvas.unbind_all("<MouseWheel>")
+                canvas.unbind_all("<Button-4>")
+                canvas.unbind_all("<Button-5>")
+            except Exception:
+                pass
         # Only capture the mouse wheel while the pointer is actually over
         # this canvas, so it doesn't hijack scrolling elsewhere in the app.
-        canvas.bind("<Enter>", lambda e: (
-            canvas.bind_all("<MouseWheel>", _wheel),
-            canvas.bind_all("<Button-4>", lambda e: canvas.yview_scroll(-1, "units")),
-            canvas.bind_all("<Button-5>", lambda e: canvas.yview_scroll(1, "units"))))
-        canvas.bind("<Leave>", lambda e: (
-            canvas.unbind_all("<MouseWheel>"),
-            canvas.unbind_all("<Button-4>"),
-            canvas.unbind_all("<Button-5>")))
+        canvas.bind("<Enter>", _bind_wheel)
+        canvas.bind("<Leave>", _unbind_wheel)
+        # Belt-and-suspenders: if the canvas is destroyed (tab closed) while
+        # the pointer is still over it, <Leave> never fires -- clean up the
+        # app-wide bindings on <Destroy> too, or a stale lambda referencing a
+        # dead widget would fire (and error) on the next scroll anywhere.
+        canvas.bind("<Destroy>", _unbind_wheel, add="+")
 
         tab.clip_canvas       = canvas
         tab.clip_scroll_inner = inner

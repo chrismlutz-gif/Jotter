@@ -1,4 +1,4 @@
-# Jotter v2.7 Release Notes
+# Jotter v2.7.1 Release Notes
 
 ## What's New
 
@@ -24,6 +24,10 @@ The Clipboard tab is a continuous, scrollable form of reusable text snippets:
 - The Clipboard tab has no file of its own — Ctrl+S / Ctrl+Shift+S and Ctrl+O don't act on it, and closing it never prompts to save, since its content is already saved continuously.
 - Right-clicking the Clipboard tab in the tab bar offers Rename, Tab Color, and Close — the text-background/text-color options (which only apply to normal rich-text tabs) are hidden for it.
 - Dark/Light mode theming applies to the Clipboard tab the same as it does everywhere else in Jotter.
+- Closing the Clipboard tab (e.g. with Ctrl+W) while the mouse is still over its line list no longer leaves a stray scroll binding behind.
+
+### Drag-and-Drop Warning
+If the optional `tkinterdnd2` package isn't installed, drag-and-drop silently didn't work at all — Windows would just show a "no drop" cursor with nothing to explain why. Jotter now shows a one-time dialog on startup in that case, explaining why and how to fix it (`pip install tkinterdnd2`), with a "Don't show this again" option that's remembered for anyone who's fine without it.
 
 ---
 
