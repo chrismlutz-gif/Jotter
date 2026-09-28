@@ -3,7 +3,7 @@
 A lightweight, tabbed rich-text editor built for speed and organisation — dark mode included.
 
 ![Python](https://img.shields.io/badge/Python-3.9%2B-blue)
-![Version](https://img.shields.io/badge/Version-2.7.5-orange)
+![Version](https://img.shields.io/badge/Version-3.0-orange)
 ![License](https://img.shields.io/badge/License-MIT-green)
 ![Platform](https://img.shields.io/badge/Platform-Windows-lightgrey)
 
@@ -42,11 +42,12 @@ A lightweight, tabbed rich-text editor built for speed and organisation — dark
 - **Continuous, growable lines** — add or remove lines freely; each line's text box grows as you type
 - **One-click copy** — the Copy button on each line loads its text onto the system clipboard, ready to paste anywhere
 - **Left-side controls** — each line's Copy and × (remove) buttons sit on the left, next to its color dot, so they stay in the same place no matter how long the line is
-- **Per-line color coding** — click a line's colored dot to tag it with a color
+- **Per-line color coding** — click a line's colored dot to tag it with a color; the line's Copy button gets a matching colored border so it stands out
 - **Durable persistence** — lines are saved to your settings immediately as you edit them, so they survive closing the tab or restarting Jotter entirely
 
 ### Interface
-- **Dark and light mode** — toggle under Options
+- **Dark and light mode** — toggle under Options; every bar, button and scrollbar follows the theme
+- **Vibrant accent colors** — tab, group and line colors are richer, and are automatically drawn a shade deeper in Light Mode so they don't wash out on white
 - **Always on Top** — pin Jotter above other windows
 - **Launch with Windows** — optional startup entry (Options menu, no admin rights needed)
 - **Tooltips** — hover over any toolbar control for a description

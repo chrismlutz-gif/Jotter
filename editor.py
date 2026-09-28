@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-editor.py -- Jotter  v2.7.5
+editor.py -- Jotter  v3.0
   * Multiple tabs with drag-to-reorder and drag-to-group
   * Per-tab accent colour, text background, text foreground
   * RTF read/write with formatting toolbar
@@ -10,8 +10,11 @@ editor.py -- Jotter  v2.7.5
   * Session persistence
   * Clipboard tab -- a singleton specialty tab of color-coded,
     copy-to-clipboard snippet lines, persisted via app settings
+  * Full dark / light theming of every bar, button and scrollbar,
+    with Light-Mode-tuned accent colors
 """
 
+import colorsys
 import tkinter as tk
 from tkinter import filedialog, messagebox, colorchooser, simpledialog, font as tkfont
 from tkinter import ttk
@@ -79,7 +82,11 @@ THEMES = {
         "status_bg": "#007acc", "status_fg": "#ffffff",
         "border": "#474747", "close_fg": "#858585",
         "menu_bg": "#252526", "menu_fg": "#cccccc", "menu_sel": "#094771",
-        "drop_line": "#ffffff", "default_dot": "#569cd6", "toolbar_fg": "#cccccc",
+        "drop_line": "#ffffff", "default_dot": "#308bd6", "toolbar_fg": "#cccccc",
+        # clickable buttons (Clipboard tab, tab-bar +/📁/📋): a step brighter
+        # than tabs so they read as buttons against the background
+        "btn_bg": "#3e3e42", "btn_hover": "#55555c", "btn_fg": "#e8e8e8",
+        "btn_close_fg": "#b8b8b8",
     },
     "light": {
         "bg": "#ffffff", "tab_bar": "#f3f3f3", "tab_idle": "#ececec",
@@ -90,13 +97,61 @@ THEMES = {
         "border": "#cccccc", "close_fg": "#717171",
         "menu_bg": "#f3f3f3", "menu_fg": "#1e1e1e", "menu_sel": "#0060c0",
         "drop_line": "#333333", "default_dot": "#0078d4", "toolbar_fg": "#555555",
+        "btn_bg": "#d6d6d6", "btn_hover": "#c2c2c2", "btn_fg": "#222222",
+        "btn_close_fg": "#444444",
     },
 }
 
-_ACCENT_CYCLE = ["#569cd6","#4ec9b0","#dcdcaa","#ce9178",
-                 "#9cdcfe","#c586c0","#f48771","#b5cea8"]
-_GROUP_COLORS = ["#e06c75","#e5c07b","#98c379","#56b6c2",
-                 "#61afef","#c678dd","#d19a66"]
+# Accent palettes -- saturation boosted ~30% (HSV) in v3.0 for more
+# vibrant dots and accents.
+_ACCENT_CYCLE = ["#308bd6","#29c9a8","#dcdc9b","#ce7f5e",
+                 "#7fd2fe","#c573be","#f4664a","#aece9d"]
+_GROUP_COLORS = ["#e04955","#e5b55b","#8bc363","#36b2c2",
+                 "#369cef","#bf5add","#d18a46"]
+
+# Pre-3.0 palette -> new palette, so colors saved in the session and
+# settings files pick up the more vibrant versions. Custom colors pass through.
+_OLD_PALETTE_MAP = {
+    "#569cd6": "#308bd6",
+    "#4ec9b0": "#29c9a8",
+    "#dcdcaa": "#dcdc9b",
+    "#ce9178": "#ce7f5e",
+    "#9cdcfe": "#7fd2fe",
+    "#c586c0": "#c573be",
+    "#f48771": "#f4664a",
+    "#b5cea8": "#aece9d",
+    "#e06c75": "#e04955",
+    "#e5c07b": "#e5b55b",
+    "#98c379": "#8bc363",
+    "#56b6c2": "#36b2c2",
+    "#61afef": "#369cef",
+    "#c678dd": "#bf5add",
+    "#d19a66": "#d18a46",
+}
+
+def _light_variant(c):
+    """Deeper, richer version of an accent color for Light Mode.
+
+    Pastel accents that look fine on a dark background wash out on white,
+    so in Light Mode dots, borders and group colors are drawn with a bit
+    more saturation and a bit less brightness. Only the on-screen color
+    changes -- the saved color is left as-is.
+    """
+    try:
+        r, g, b = (int(c[i:i + 2], 16) / 255 for i in (1, 3, 5))
+    except (TypeError, ValueError, IndexError):
+        return c
+    h, s, v = colorsys.rgb_to_hsv(r, g, b)
+    s = min(1.0, s * 1.25 + (0.12 if s < 0.45 else 0.0))
+    v = v * 0.88
+    r, g, b = colorsys.hsv_to_rgb(h, s, v)
+    return "#%02x%02x%02x" % (round(r * 255), round(g * 255), round(b * 255))
+
+def _upgrade_color(c):
+    """Map a saved pre-3.0 palette color to its vibrant replacement."""
+    if isinstance(c, str):
+        return _OLD_PALETTE_MAP.get(c.lower(), c)
+    return c
 
 
 class ToolTip:
@@ -298,17 +353,17 @@ class Editor(TkinterDnD.Tk if _DND_AVAILABLE else tk.Tk):
         ])
         for name in ('Jotter.Vertical.TScrollbar', 'Jotter.Horizontal.TScrollbar'):
             s.configure(name,
-                background=T['tab_bar'],
+                background=T['btn_bg'],
                 troughcolor=T['bg'],
                 bordercolor=T['bg'],
-                darkcolor=T['tab_bar'],
-                lightcolor=T['tab_bar'],
+                darkcolor=T['btn_bg'],
+                lightcolor=T['btn_bg'],
                 arrowcolor=T['menu_fg'],
                 width=_SB_W,
                 arrowsize=_SB_W)
             s.map(name, background=[
-                ('active', T['tab_hover']),
-                ('!active', T['tab_bar']),
+                ('active', T['btn_hover']),
+                ('!active', T['btn_bg']),
             ])
 
     # ----------------------------------------------------------------
@@ -394,36 +449,37 @@ class Editor(TkinterDnD.Tk if _DND_AVAILABLE else tk.Tk):
         self._drop_canvas  = canvas
         self._drop_line_id = None
         # "+" new-tab button pinned to the right of the bar
-        plus = tk.Label(outer, text="  ＋  ", bg=T["tab_idle"], fg=T["toolbar_fg"],
+        plus = tk.Label(outer, text="  ＋  ", bg=T["btn_bg"], fg=T["btn_fg"],
                         font=("Segoe UI", 13, "bold"), cursor="hand2",
                         relief="flat", padx=2, pady=3)
         plus.pack(side="right", padx=6, pady=3)
         plus.bind("<Button-1>", lambda e: self.cmd_new_tab())
-        plus.bind("<Enter>", lambda e: plus.configure(bg=T["tab_hover"]))
-        plus.bind("<Leave>", lambda e: plus.configure(bg=T["tab_idle"]))
+        plus.bind("<Enter>", lambda e: plus.configure(bg=self._T["btn_hover"]))
+        plus.bind("<Leave>", lambda e: plus.configure(bg=self._T["btn_bg"]))
         ToolTip(plus, "New tab  (Ctrl+N)")
 
         # "open save folder" button, pinned just left of the "+" button
-        folder = tk.Label(outer, text=" 📁 ", bg=T["tab_idle"], fg=T["toolbar_fg"],
+        folder = tk.Label(outer, text=" 📁 ", bg=T["btn_bg"], fg=T["btn_fg"],
                           font=("Segoe UI", 11), cursor="hand2",
                           relief="flat", padx=2, pady=3)
         folder.pack(side="right", padx=(0, 0), pady=3)
         folder.bind("<Button-1>", lambda e: self.cmd_open_save_folder())
-        folder.bind("<Enter>", lambda e: folder.configure(bg=T["tab_hover"]))
-        folder.bind("<Leave>", lambda e: folder.configure(bg=T["tab_idle"]))
+        folder.bind("<Enter>", lambda e: folder.configure(bg=self._T["btn_hover"]))
+        folder.bind("<Leave>", lambda e: folder.configure(bg=self._T["btn_bg"]))
         ToolTip(folder, "Open default save folder")
 
         # "clipboard" specialty-tab button, pinned just left of the folder button.
         # Only one Clipboard tab can be open at a time; clicking this either
         # opens it or switches to the one already open.
-        clipbtn = tk.Label(outer, text=" 📋 ", bg=T["tab_idle"], fg=T["toolbar_fg"],
+        clipbtn = tk.Label(outer, text=" 📋 ", bg=T["btn_bg"], fg=T["btn_fg"],
                            font=("Segoe UI", 11), cursor="hand2",
                            relief="flat", padx=2, pady=3)
         clipbtn.pack(side="right", padx=(0, 0), pady=3)
         clipbtn.bind("<Button-1>", lambda e: self.cmd_new_clipboard_tab())
-        clipbtn.bind("<Enter>", lambda e: clipbtn.configure(bg=T["tab_hover"]))
-        clipbtn.bind("<Leave>", lambda e: clipbtn.configure(bg=T["tab_idle"]))
+        clipbtn.bind("<Enter>", lambda e: clipbtn.configure(bg=self._T["btn_hover"]))
+        clipbtn.bind("<Leave>", lambda e: clipbtn.configure(bg=self._T["btn_bg"]))
         ToolTip(clipbtn, "Open the Clipboard tab\n(only one can be open at a time)")
+        self._bar_btns = [plus, folder, clipbtn]
 
     def _rebuild_tab_buttons(self):
         T = self._T
@@ -454,18 +510,18 @@ class Editor(TkinterDnD.Tk if _DND_AVAILABLE else tk.Tk):
 
     def _make_group_container(self, group, tabs, parent):
         T   = self._T
-        con = tk.Frame(parent, bg=group.color, bd=0)
+        con = tk.Frame(parent, bg=self._disp(group.color), bd=0)
         group.container = con
-        strip = tk.Frame(con, bg=group.color, cursor="hand2")
+        strip = tk.Frame(con, bg=self._disp(group.color), cursor="hand2")
         strip.pack(side="top", fill="x")
         group.strip = strip
         btn = tk.Label(strip, text="▾" if not group.collapsed else "▸",
-                       bg=group.color, fg="#ffffff",
+                       bg=self._disp(group.color), fg="#ffffff",
                        font=("Segoe UI", 9), padx=3, cursor="hand2")
         btn.pack(side="left")
         group.collapse_btn = btn
         lbl = tk.Label(strip, text=group.label,
-                       bg=group.color, fg="#ffffff",
+                       bg=self._disp(group.color), fg="#ffffff",
                        font=("Segoe UI", 9, "bold"), padx=4, cursor="hand2")
         lbl.pack(side="left")
         group.label_lbl = lbl
@@ -492,7 +548,7 @@ class Editor(TkinterDnD.Tk if _DND_AVAILABLE else tk.Tk):
         dot = tk.Canvas(frm, width=10, height=10, bg=bg,
                         highlightthickness=0, cursor="hand2")
         dot.pack(side="left", padx=(6,2), pady=8)
-        oid = dot.create_oval(1,1,9,9, fill=dot_color, outline="")
+        oid = dot.create_oval(1,1,9,9, fill=self._disp(dot_color), outline="")
         tab.dot_canvas = dot
         tab.oval_id   = oid
         title_lbl = tk.Label(frm, text=tab.title, bg=bg, fg=T["toolbar_fg"],
@@ -886,13 +942,13 @@ class Editor(TkinterDnD.Tk if _DND_AVAILABLE else tk.Tk):
         def pick(c):
             tab.color = c
             if tab.dot_canvas and tab.oval_id:
-                tab.dot_canvas.itemconfig(tab.oval_id, fill=c)
+                tab.dot_canvas.itemconfig(tab.oval_id, fill=self._disp(c))
             win.destroy()
         for c in _ACCENT_CYCLE:
             b = tk.Canvas(row, width=24, height=24, bg=T["tab_bar"],
                           highlightthickness=0, cursor="hand2")
             b.pack(side="left", padx=3)
-            b.create_oval(3,3,21,21, fill=c, outline="")
+            b.create_oval(3,3,21,21, fill=self._disp(c), outline="")
             b.bind("<Button-1>", lambda e, col=c: pick(col))
         def custom():
             r = colorchooser.askcolor(color=tab.color or T["default_dot"],
@@ -1068,7 +1124,7 @@ class Editor(TkinterDnD.Tk if _DND_AVAILABLE else tk.Tk):
         win.grab_set()
         tk.Label(win, text="Jotter", bg=T["bg"], fg=T["menu_fg"],
                  font=("Segoe UI", 20, "bold"), pady=12).pack()
-        tk.Label(win, text="Version 2.7.5", bg=T["bg"], fg=T["menu_fg"],
+        tk.Label(win, text="Version 3.0", bg=T["bg"], fg=T["menu_fg"],
                  font=("Segoe UI", 11)).pack()
         tk.Label(win, text="A lightweight rich-text editor", bg=T["bg"],
                  fg=T["close_fg"], font=("Segoe UI", 10), pady=4).pack()
@@ -1334,10 +1390,45 @@ class Editor(TkinterDnD.Tk if _DND_AVAILABLE else tk.Tk):
         except Exception as e:
             messagebox.showerror("Save Error", str(e), parent=self)
 
+    def _disp(self, c):
+        """Color to draw for accent color *c* in the current theme."""
+        if self._theme_name == "light" and isinstance(c, str) and c.startswith("#") and len(c) == 7:
+            return _light_variant(c)
+        return c
+
+    def _apply_bar_theme(self):
+        """Re-theme the tab bar strip and its pinned +/📁/📋 buttons."""
+        T = self._T
+        for name in ("_bar_outer", "_bar_canvas", "_bar_inner"):
+            w = getattr(self, name, None)
+            if w is not None:
+                w.configure(bg=T["tab_bar"])
+        for b in getattr(self, "_bar_btns", []):
+            b.configure(bg=T["btn_bg"], fg=T["btn_fg"])
+
+    def _apply_fmt_theme(self):
+        """Re-theme the formatting toolbar and ttk scrollbars."""
+        T = self._T
+        self._configure_scrollbar_style()
+        if getattr(self, "_fmt_bar", None) is None:
+            return
+        self._fmt_bar.configure(bg=T["tab_bar"])
+        for w in self._fmt_btns + self._fmt_labels:
+            w.configure(bg=T["tab_idle"], fg=T["toolbar_fg"])
+        for sw in (self._fg_swatch, self._bg_swatch):
+            sw.configure(bg=T["tab_idle"], highlightbackground=T["border"])
+        self._fmt_spacer.configure(bg=T["tab_bar"])
+        self._wrap_btn.configure(bg=T["tab_bar"], fg=T["toolbar_fg"],
+                                 selectcolor=T["tab_idle"],
+                                 activebackground=T["tab_bar"],
+                                 activeforeground=T["toolbar_fg"])
+
     def cmd_toggle_theme(self, event=None):
         self._theme_name = "light" if self._theme_name == "dark" else "dark"
         self._T = THEMES[self._theme_name]
         self.configure(bg=self._T["bg"])
+        self._apply_bar_theme()
+        self._apply_fmt_theme()
         self._rebuild_tab_buttons()
         for tab in self._tabs:
             if tab.kind == "clipboard":
@@ -1361,6 +1452,9 @@ class Editor(TkinterDnD.Tk if _DND_AVAILABLE else tk.Tk):
         bar = tk.Frame(self, bg=T["tab_bar"], pady=2)
         bar.pack(side="top", fill="x")
         self._fmt_bar = bar
+        # widgets re-colored by _apply_fmt_theme() when the theme changes
+        self._fmt_btns   = []   # Label-based buttons (B, I, U, ≡L, ...)
+        self._fmt_labels = []   # static "A" / "HL" captions
 
         families = sorted(tkfont.families())
         self._font_var = tk.StringVar(value="Consolas")
@@ -1389,18 +1483,16 @@ class Editor(TkinterDnD.Tk if _DND_AVAILABLE else tk.Tk):
         # on click, so the text widget keeps focus and sel is preserved.
         # All formatting buttons are therefore Labels with click/hover bindings.
         # ------------------------------------------------------------------
-        _bg      = T["tab_idle"]
-        _fg      = T["toolbar_fg"]
-        _hov     = T["tab_hover"]
-
         def _fmt_lbl(parent, text, font, cmd, padx=6, **kw):
             """Label-based button that never steals focus from the text widget."""
             lbl = tk.Label(parent, text=text, font=font,
-                           bg=_bg, fg=_fg, cursor="hand2",
+                           bg=T["tab_idle"], fg=T["toolbar_fg"], cursor="hand2",
                            relief="flat", padx=padx, pady=2, **kw)
             lbl.bind("<Button-1>", lambda e: cmd())
-            lbl.bind("<Enter>",    lambda e: lbl.configure(bg=_hov))
-            lbl.bind("<Leave>",    lambda e: lbl.configure(bg=_bg))
+            # read self._T at event time so hover follows theme switches
+            lbl.bind("<Enter>",    lambda e: lbl.configure(bg=self._T["tab_hover"]))
+            lbl.bind("<Leave>",    lambda e: lbl.configure(bg=self._T["tab_idle"]))
+            self._fmt_btns.append(lbl)
             return lbl
 
         def _show_case_menu(event=None):
@@ -1452,8 +1544,10 @@ class Editor(TkinterDnD.Tk if _DND_AVAILABLE else tk.Tk):
             fill="#ff0000", outline="")
         self._fg_swatch.bind("<Button-1>", lambda e: self._fmt_pick_fg())
         ToolTip(self._fg_swatch, "Text color\nClick to choose color")
-        tk.Label(bar, text="A", bg=T["tab_idle"], fg=T["toolbar_fg"],
-                 font=("Segoe UI", 9)).pack(side="left")
+        a_lbl = tk.Label(bar, text="A", bg=T["tab_idle"], fg=T["toolbar_fg"],
+                         font=("Segoe UI", 9))
+        a_lbl.pack(side="left")
+        self._fmt_labels.append(a_lbl)
 
         self._bg_swatch = tk.Canvas(bar, width=22, height=22,
             bg=T["tab_idle"], highlightthickness=1,
@@ -1464,10 +1558,14 @@ class Editor(TkinterDnD.Tk if _DND_AVAILABLE else tk.Tk):
             fill="#ffff00", outline="")
         self._bg_swatch.bind("<Button-1>", lambda e: self._fmt_pick_bg())
         ToolTip(self._bg_swatch, "Highlight color\nClick to choose color")
-        tk.Label(bar, text="HL", bg=T["tab_idle"], fg=T["toolbar_fg"],
-                 font=("Segoe UI", 9)).pack(side="left")
+        hl_lbl = tk.Label(bar, text="HL", bg=T["tab_idle"], fg=T["toolbar_fg"],
+                          font=("Segoe UI", 9))
+        hl_lbl.pack(side="left")
+        self._fmt_labels.append(hl_lbl)
 
-        tk.Label(bar, text=" ", bg=T["tab_bar"]).pack(side="left", padx=4)
+        spacer = tk.Label(bar, text=" ", bg=T["tab_bar"])
+        spacer.pack(side="left", padx=4)
+        self._fmt_spacer = spacer
         align_tips = {"left": "Align left", "center": "Align center", "right": "Align right"}
         for sym, align in [("≡L","left"),("≡C","center"),("≡R","right")]:
             ab = _fmt_lbl(bar, sym, ("Segoe UI", 10),
@@ -2104,7 +2202,7 @@ class Editor(TkinterDnD.Tk if _DND_AVAILABLE else tk.Tk):
             return
         tab = Tab("📋 Clipboard")
         tab.kind  = "clipboard"
-        tab.color = "#c586c0"
+        tab.color = "#c573be"
         self._tabs.append(tab)
         self._make_clipboard_area(tab)
         self._rebuild_tab_buttons()
@@ -2119,7 +2217,7 @@ class Editor(TkinterDnD.Tk if _DND_AVAILABLE else tk.Tk):
             if isinstance(item, dict):
                 lines.append({
                     "text":  item.get("text", ""),
-                    "color": item.get("color") or _ACCENT_CYCLE[0],
+                    "color": _upgrade_color(item.get("color")) or _ACCENT_CYCLE[0],
                 })
         return lines
 
@@ -2159,13 +2257,13 @@ class Editor(TkinterDnD.Tk if _DND_AVAILABLE else tk.Tk):
 
         top_bar = tk.Frame(frame, bg=T["tab_bar"])
         top_bar.pack(side="top", fill="x")
-        add_btn = tk.Label(top_bar, text="  + Add Line  ", bg=T["tab_idle"],
-                           fg=T["toolbar_fg"], font=("Segoe UI", 10),
+        add_btn = tk.Label(top_bar, text="  + Add Line  ", bg=T["btn_bg"],
+                           fg=T["btn_fg"], font=("Segoe UI", 10),
                            cursor="hand2", pady=6)
         add_btn.pack(side="left", padx=8, pady=6)
         add_btn.bind("<Button-1>", lambda e: self._clip_add_row(tab))
-        add_btn.bind("<Enter>", lambda e: add_btn.configure(bg=T["tab_hover"]))
-        add_btn.bind("<Leave>", lambda e: add_btn.configure(bg=T["tab_idle"]))
+        add_btn.bind("<Enter>", lambda e: add_btn.configure(bg=self._T["btn_hover"]))
+        add_btn.bind("<Leave>", lambda e: add_btn.configure(bg=self._T["btn_bg"]))
         ToolTip(add_btn, "Add a new line")
         tab.clip_add_btn = add_btn
         tab.clip_top_bar = top_bar
@@ -2237,19 +2335,23 @@ class Editor(TkinterDnD.Tk if _DND_AVAILABLE else tk.Tk):
         # then the snippet text filling the rest of the row.
         btn_col = tk.Frame(row_frame, bg=T["bg"])
         btn_col.pack(side="left", padx=(0, 6), anchor="n")
-        copy_btn = tk.Label(btn_col, text=" Copy ", bg=T["tab_idle"],
-                            fg=T["toolbar_fg"], font=("Segoe UI", 9),
-                            cursor="hand2", pady=2)
-        copy_btn.pack(side="top", pady=(0, 2))
-        remove_btn = tk.Label(btn_col, text="  ×  ", bg=T["tab_idle"],
-                              fg=T["close_fg"], font=("Segoe UI", 10),
+        copy_btn = tk.Label(btn_col, text=" Copy ", bg=T["btn_bg"],
+                            fg=T["btn_fg"], font=("Segoe UI", 9),
+                            cursor="hand2", pady=2,
+                            # outline matches the line's color dot so Copy stands out
+                            highlightthickness=2,
+                            highlightbackground=self._disp(color),
+                            highlightcolor=self._disp(color))
+        copy_btn.pack(side="top", pady=(0, 3))
+        remove_btn = tk.Label(btn_col, text="  ×  ", bg=T["btn_bg"],
+                              fg=T["btn_close_fg"], font=("Segoe UI", 10),
                               cursor="hand2")
         remove_btn.pack(side="top")
 
         dot = tk.Canvas(row_frame, width=14, height=14, bg=T["bg"],
                         highlightthickness=0, cursor="hand2")
         dot.pack(side="left", padx=(2, 8), pady=4, anchor="n")
-        oid = dot.create_oval(1, 1, 13, 13, fill=color, outline="")
+        oid = dot.create_oval(1, 1, 13, 13, fill=self._disp(color), outline="")
 
         txt = tk.Text(row_frame, height=2, wrap="word", undo=True,
                       bg=T["text_bg"], fg=T["text_fg"],
@@ -2274,11 +2376,11 @@ class Editor(TkinterDnD.Tk if _DND_AVAILABLE else tk.Tk):
         txt.bind("<KeyRelease>", lambda e: (_grow(), self._schedule_clip_save(tab)))
         dot.bind("<Button-1>", lambda e: self._clip_pick_color(tab, row))
         copy_btn.bind("<Button-1>", lambda e: self._clip_copy_row(tab, row))
-        copy_btn.bind("<Enter>", lambda e: copy_btn.configure(bg=T["tab_hover"]))
-        copy_btn.bind("<Leave>", lambda e: copy_btn.configure(bg=T["tab_idle"]))
+        copy_btn.bind("<Enter>", lambda e: copy_btn.configure(bg=self._T["btn_hover"]))
+        copy_btn.bind("<Leave>", lambda e: copy_btn.configure(bg=self._T["btn_bg"]))
         remove_btn.bind("<Button-1>", lambda e: self._clip_remove_row(tab, row))
-        remove_btn.bind("<Enter>", lambda e: remove_btn.configure(bg=T["tab_hover"]))
-        remove_btn.bind("<Leave>", lambda e: remove_btn.configure(bg=T["tab_idle"]))
+        remove_btn.bind("<Enter>", lambda e: remove_btn.configure(bg=self._T["btn_hover"]))
+        remove_btn.bind("<Leave>", lambda e: remove_btn.configure(bg=self._T["btn_bg"]))
 
         self._refresh_status()
         if persist:
@@ -2322,14 +2424,16 @@ class Editor(TkinterDnD.Tk if _DND_AVAILABLE else tk.Tk):
         row_frame.pack(padx=12, pady=(0, 8))
         def pick(c):
             row["color"] = c
-            row["dot"].itemconfig(row["oval"], fill=c)
+            row["dot"].itemconfig(row["oval"], fill=self._disp(c))
+            row["copy_btn"].configure(highlightbackground=self._disp(c),
+                                      highlightcolor=self._disp(c))
             self._save_clip_lines_now(tab)
             win.destroy()
         for c in _ACCENT_CYCLE:
             b = tk.Canvas(row_frame, width=24, height=24, bg=T["tab_bar"],
                          highlightthickness=0, cursor="hand2")
             b.pack(side="left", padx=3)
-            b.create_oval(3, 3, 21, 21, fill=c, outline="")
+            b.create_oval(3, 3, 21, 21, fill=self._disp(c), outline="")
             b.bind("<Button-1>", lambda e, col=c: pick(col))
         def custom():
             r = colorchooser.askcolor(color=row["color"], parent=win,
@@ -2353,7 +2457,7 @@ class Editor(TkinterDnD.Tk if _DND_AVAILABLE else tk.Tk):
         if getattr(tab, "clip_top_bar", None):
             tab.clip_top_bar.configure(bg=T["tab_bar"])
         if getattr(tab, "clip_add_btn", None):
-            tab.clip_add_btn.configure(bg=T["tab_idle"], fg=T["toolbar_fg"])
+            tab.clip_add_btn.configure(bg=T["btn_bg"], fg=T["btn_fg"])
         for row in tab.clip_rows:
             row["frame"].configure(bg=T["bg"])
             row["dot"].configure(bg=T["bg"])
@@ -2361,8 +2465,11 @@ class Editor(TkinterDnD.Tk if _DND_AVAILABLE else tk.Tk):
                 row["btn_col"].configure(bg=T["bg"])
             row["text"].configure(bg=T["text_bg"], fg=T["text_fg"],
                                   insertbackground=T["text_fg"])
-            row["copy_btn"].configure(bg=T["tab_idle"], fg=T["toolbar_fg"])
-            row["remove_btn"].configure(bg=T["tab_idle"], fg=T["close_fg"])
+            row["copy_btn"].configure(bg=T["btn_bg"], fg=T["btn_fg"],
+                                      highlightbackground=self._disp(row["color"]),
+                                      highlightcolor=self._disp(row["color"]))
+            row["dot"].itemconfig(row["oval"], fill=self._disp(row["color"]))
+            row["remove_btn"].configure(bg=T["btn_bg"], fg=T["btn_close_fg"])
             row["sep"].configure(bg=T["border"])
 
     # ----------------------------------------------------------------
@@ -2514,6 +2621,8 @@ class Editor(TkinterDnD.Tk if _DND_AVAILABLE else tk.Tk):
             self._theme_name = theme
             self._T = THEMES[theme]
             self.configure(bg=self._T["bg"])
+            self._apply_bar_theme()
+            self._apply_fmt_theme()
 
         raw_groups = data.get("groups", {})
         if not isinstance(raw_groups, dict):
@@ -2521,7 +2630,7 @@ class Editor(TkinterDnD.Tk if _DND_AVAILABLE else tk.Tk):
 
         group_map = {}
         for gid, gdata in raw_groups.items():
-            grp = TabGroup(color=gdata.get("color"))
+            grp = TabGroup(color=_upgrade_color(gdata.get("color")))
             grp.label     = gdata.get("label", grp.label)
             grp.collapsed = gdata.get("collapsed", False)
             group_map[gid] = grp
@@ -2537,7 +2646,7 @@ class Editor(TkinterDnD.Tk if _DND_AVAILABLE else tk.Tk):
             tab.kind     = kind
             tab.filepath = tdata.get("filepath")
             tab.named    = tdata.get("named", False)
-            tab.color    = tdata.get("color")
+            tab.color    = _upgrade_color(tdata.get("color"))
             tab.text_bg  = tdata.get("text_bg")
             tab.text_fg  = tdata.get("text_fg")
             gid          = tdata.get("group_id")
