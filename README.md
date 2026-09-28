@@ -3,7 +3,7 @@
 A lightweight, tabbed rich-text editor built for speed and organisation — dark mode included.
 
 ![Python](https://img.shields.io/badge/Python-3.9%2B-blue)
-![Version](https://img.shields.io/badge/Version-2.7.1-orange)
+![Version](https://img.shields.io/badge/Version-2.7.5-orange)
 ![License](https://img.shields.io/badge/License-MIT-green)
 ![Platform](https://img.shields.io/badge/Platform-Windows-lightgrey)
 
@@ -41,6 +41,7 @@ A lightweight, tabbed rich-text editor built for speed and organisation — dark
 - **Clipboard tab** — a singleton tab (only one can be open at a time) for reusable text snippets. Open it from the 📋 button next to the tab bar's "+" button, or File → New Clipboard Tab
 - **Continuous, growable lines** — add or remove lines freely; each line's text box grows as you type
 - **One-click copy** — the Copy button on each line loads its text onto the system clipboard, ready to paste anywhere
+- **Left-side controls** — each line's Copy and × (remove) buttons sit on the left, next to its color dot, so they stay in the same place no matter how long the line is
 - **Per-line color coding** — click a line's colored dot to tag it with a color
 - **Durable persistence** — lines are saved to your settings immediately as you edit them, so they survive closing the tab or restarting Jotter entirely
 
@@ -88,9 +89,9 @@ A lightweight, tabbed rich-text editor built for speed and organisation — dark
 
 ## Installation
 
-### Option 1 — Run the installer (Windows)
+### Option 1 — Run the EXE (Windows)
 
-Download `JotterSetup.exe` from the [Releases](https://github.com/chrismlutz-gif/Jotter/releases) page and run it.
+Download `Jotter.exe` from the [Releases](https://github.com/chrismlutz-gif/Jotter/releases) page and run it — no installation needed.
 
 ### Option 2 — Run from source
 
@@ -105,19 +106,19 @@ python editor.py
 
 ---
 
-## Building the installer yourself
+## Building the EXE yourself
 
-1. Install [Inno Setup 7](https://jrsoftware.org/isdl.php) (free)
-2. Open a terminal in the project folder and run:
+Open a terminal in the project folder and run:
 
 ```bat
 build.bat
 ```
 
 This will:
-- Install PyInstaller and tkinterdnd2 (if not already present)
+- Install PyInstaller (if not already present)
 - Bundle `editor.py`, `rtf_io.py`, and supporting files into `dist\Jotter.exe`
-- Compile `installer\JotterSetup.exe` via Inno Setup
+
+Copy `dist\Jotter.exe` wherever you want and run it.
 
 ---
 
@@ -129,7 +130,6 @@ Jotter/
 ├── rtf_io.py        # RTF parser and writer
 ├── jotter.ico       # Application icon
 ├── jotter.spec      # PyInstaller build spec
-├── jotter.iss       # Inno Setup installer script
 ├── build.bat        # One-click build script
 ├── LICENSE
 └── README.md

@@ -19,7 +19,7 @@ if errorlevel 1 (
 git config --global credential.helper manager
 
 :: Stage files
-set FILES=editor.py jotter.ico jotter.spec jotter.iss build.bat push_to_github.bat README.md LICENSE .gitignore
+set FILES=editor.py rtf_io.py jotter.ico jotter.spec build.bat push_to_github.bat README.md LICENSE .gitignore RELEASE_*.md
 
 if exist ".git" (
     echo Existing repo found -- committing update...

@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-editor.py -- Jotter  v2.7.1
+editor.py -- Jotter  v2.7.5
   * Multiple tabs with drag-to-reorder and drag-to-group
   * Per-tab accent colour, text background, text foreground
   * RTF read/write with formatting toolbar
@@ -1068,7 +1068,7 @@ class Editor(TkinterDnD.Tk if _DND_AVAILABLE else tk.Tk):
         win.grab_set()
         tk.Label(win, text="Jotter", bg=T["bg"], fg=T["menu_fg"],
                  font=("Segoe UI", 20, "bold"), pady=12).pack()
-        tk.Label(win, text="Version 2.7.1", bg=T["bg"], fg=T["menu_fg"],
+        tk.Label(win, text="Version 2.7.5", bg=T["bg"], fg=T["menu_fg"],
                  font=("Segoe UI", 11)).pack()
         tk.Label(win, text="A lightweight rich-text editor", bg=T["bg"],
                  fg=T["close_fg"], font=("Segoe UI", 10), pady=4).pack()
@@ -2233,6 +2233,19 @@ class Editor(TkinterDnD.Tk if _DND_AVAILABLE else tk.Tk):
         row_frame = tk.Frame(parent, bg=T["bg"])
         row_frame.pack(side="top", fill="x", padx=8, pady=4)
 
+        # Copy / remove buttons sit on the far left, then the color dot,
+        # then the snippet text filling the rest of the row.
+        btn_col = tk.Frame(row_frame, bg=T["bg"])
+        btn_col.pack(side="left", padx=(0, 6), anchor="n")
+        copy_btn = tk.Label(btn_col, text=" Copy ", bg=T["tab_idle"],
+                            fg=T["toolbar_fg"], font=("Segoe UI", 9),
+                            cursor="hand2", pady=2)
+        copy_btn.pack(side="top", pady=(0, 2))
+        remove_btn = tk.Label(btn_col, text="  ×  ", bg=T["tab_idle"],
+                              fg=T["close_fg"], font=("Segoe UI", 10),
+                              cursor="hand2")
+        remove_btn.pack(side="top")
+
         dot = tk.Canvas(row_frame, width=14, height=14, bg=T["bg"],
                         highlightthickness=0, cursor="hand2")
         dot.pack(side="left", padx=(2, 8), pady=4, anchor="n")
@@ -2246,23 +2259,12 @@ class Editor(TkinterDnD.Tk if _DND_AVAILABLE else tk.Tk):
         if text:
             txt.insert("1.0", text)
 
-        btn_col = tk.Frame(row_frame, bg=T["bg"])
-        btn_col.pack(side="left", padx=(6, 0))
-        copy_btn = tk.Label(btn_col, text=" Copy ", bg=T["tab_idle"],
-                            fg=T["toolbar_fg"], font=("Segoe UI", 9),
-                            cursor="hand2", pady=2)
-        copy_btn.pack(side="top", pady=(0, 2))
-        remove_btn = tk.Label(btn_col, text="  ×  ", bg=T["tab_idle"],
-                              fg=T["close_fg"], font=("Segoe UI", 10),
-                              cursor="hand2")
-        remove_btn.pack(side="top")
-
         sep = tk.Frame(parent, height=1, bg=T["border"])
         sep.pack(side="top", fill="x", padx=8)
 
         row = {"frame": row_frame, "text": txt, "dot": dot, "oval": oid,
               "color": color, "copy_btn": copy_btn, "remove_btn": remove_btn,
-              "sep": sep}
+              "sep": sep, "btn_col": btn_col}
         tab.clip_rows.append(row)
 
         def _grow(tw=txt):
@@ -2355,6 +2357,8 @@ class Editor(TkinterDnD.Tk if _DND_AVAILABLE else tk.Tk):
         for row in tab.clip_rows:
             row["frame"].configure(bg=T["bg"])
             row["dot"].configure(bg=T["bg"])
+            if "btn_col" in row:
+                row["btn_col"].configure(bg=T["bg"])
             row["text"].configure(bg=T["text_bg"], fg=T["text_fg"],
                                   insertbackground=T["text_fg"])
             row["copy_btn"].configure(bg=T["tab_idle"], fg=T["toolbar_fg"])
